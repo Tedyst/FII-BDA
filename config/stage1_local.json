@@ -1,0 +1,35 @@
+{
+  "stage": "local",
+  "spark": {
+    "master": "local[3]",
+    "app_name": "RestaurantRecommendationSystem",
+    "executor_memory": "2g",
+    "driver_memory": "2g",
+    "shuffle_partitions": "200"
+  },
+  "data": {
+    "source": "local",
+    "base_path": "data",
+    "users_file": "10_002_users-food_allergy.csv",
+    "restaurants_file": "9558_restaurants.csv",
+    "recipes_file": "2_231_151_recipes_data.csv",
+    "food_file": "food.csv",
+    "nutrient_file": "nutrient.csv",
+    "food_nutrient_file": "food_nutrient.csv"
+  },
+  "model": {
+    "target_rmse_min": 0.88,
+    "target_rmse_max": 0.92,
+    "train_test_split": 0.8,
+    "cold_start_strategy": "drop",
+    "num_recommendations": 5,
+    "max_iter": 10,
+    "reg_param": 0.1,
+    "rank": 10
+  },
+  "output": {
+    "model_path": "models/als_restaurant_recommendation_model",
+    "recommendations_path": "output/recommendations"
+  }
+}
+
