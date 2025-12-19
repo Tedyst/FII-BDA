@@ -1,221 +1,147 @@
-# Restaurant Recommendation System
+# Food Nutritional Analysis (USDA FDC)
 
-A comprehensive restaurant recommendation system using Apache Spark, PySpark, and SparkML with ALS (Alternating Least Squares) collaborative filtering algorithm. The system recommends restaurants based on user preferences, food allergies, dietary restrictions, and nutrient information.
+This project analyzes food composition and nutrients using the USDA FoodData Central (FDC) dataset. It converts the official CSVs to Parquet for faster processing, samples manageable subsets, and uses Apache Spark to build comprehensive nutritional profiles per food (`fdc_id`).
+
+You need the full dataset from: https://fdc.nal.usda.gov/download-datasets
 
 ## Features
 
-- **Collaborative Filtering**: Uses ALS algorithm for personalized restaurant recommendations
-- **Allergy & Dietary Restrictions**: Filters restaurants based on:
-  - Food allergies
-  - Diabetes
-  - Celiac disease (gluten-free)
-  - Lactose intolerance
-  - Obesity considerations
-- **Multi-Stage Deployment**: Supports three deployment scenarios:
-  - **Stage 1**: Local execution with simulated cluster
-  - **Stage 2**: Private cloud with SSH-based round-robin data loading
-  - **Stage 3**: GCP Dataproc deployment
-- **Model Optimization**: Hyperparameter tuning to achieve RMSE between 0.88-0.92
-- **Cold Start Handling**: Uses "drop" strategy for new users/restaurants
+- **CSV → Parquet conversion**: Faster IO via `pandas` + `pyarrow`
+- **Sampling utility**: Create a smaller Parquet subset preserving relationships
+- **Spark processing**: Aggregate and pivot nutrient values into profiles
+- **Export results**: Write final nutritional profiles to Parquet
 
 ## Project Structure
 
 ```
 FII-BDA/
-├── data/                          # CSV data files
-│   ├── 10_002_users-food_allergy.csv
-│   ├── 9558_restaurants.csv
-│   ├── 2_231_151_recipes_data.csv
-│   ├── food.csv
-│   ├── nutrient.csv
-│   ├── food_nutrient.csv
-│   └── ...
-├── src/                           # Source code modules
-│   ├── __init__.py
-│   ├── data_processor.py          # ETL operations
-│   └── recommendation_engine.py   # ALS recommendation engine
-├── notebooks/                     # Jupyter notebooks
-│   └── restaurant_recommendation_system.ipynb
-├── config/                        # Configuration files
-│   ├── stage1_local.json
-│   ├── stage2_private_cloud.json
-│   └── stage3_gcp_dataproc.json
-├── scripts/                       # Deployment scripts
-│   ├── stage1_local.py
-│   ├── stage2_private_cloud.py
-│   ├── stage3_gcp_dataproc.sh
-│   └── main_dataproc.py
-├── models/                        # Saved models (generated)
-├── output/                        # Output files (generated)
+├── dataset/                       # Place official FDC CSVs here
+├── converted-dataset/             # Generated Parquet files (CSV → Parquet)
+├── sampled_dataset/               # Sampled Parquet subset (generated)
+├── output/                        # Results (generated)
+│   ├── nutritional_profiles_parquet/
+├── convert_csvs_to_parquet.py     # CSV → Parquet converter (pandas)
+├── sample_datasets.py             # Sampling script (reads/writes Parquet)
+├── generate_nutritional_values.ipynb  # Spark processing to build profiles
+├── main.py
 ├── pyproject.toml
-└── README.md
+├── README.md
+├── QUICKSTART.md
+└── PROJECT_SUMMARY.md
 ```
 
 ## Requirements
 
 - Python 3.10+
 - Apache Spark 3.5+
-- Java 8 or 11 (required for Spark)
-- JupyterLab (for notebook execution)
+- Java 8 or 11 (for Spark)
+- JupyterLab
+- `pandas`, `pyarrow`, `pyspark` (managed via `pyproject.toml`)
 
-## Installation
+## Install & Setup
 
-1. **Install dependencies**:
-```bash
-pip install -e .
-```
+1. Install Python deps (using uv recommended):
 
-Or using uv:
 ```bash
 uv sync
 ```
 
-2. **Install Apache Spark**:
-   - Download Spark from https://spark.apache.org/downloads.html
-   - Extract and set `SPARK_HOME` environment variable
-   - Add Spark binaries to PATH
+2. Install Apache Spark:
+   - Download: https://spark.apache.org/downloads.html
+   - Set environment:
 
-3. **For JupyterLab**:
 ```bash
-pip install jupyterlab
-jupyter lab
+export SPARK_HOME=/path/to/spark
+export PATH=$SPARK_HOME/bin:$PATH
 ```
+
+3. Download the full FDC dataset (CSV) and extract into [dataset/](dataset/):
+
+   - https://fdc.nal.usda.gov/download-datasets
+   - Ensure files like `food.csv`, `nutrient.csv`, `food_nutrient.csv`, `food_portion.csv`, `measure_unit.csv` exist.
+
+4. Convert CSVs to Parquet:
+
+```bash
+uv run python convert_csvs_to_parquet.py --input-dir dataset --output-dir converted-dataset
+```
+
+5. (Optional) Create a sampled Parquet subset:
+
+```bash
+uv run python sample_datasets.py
+```
+
+6. Generate nutritional profiles (Spark):
+   - Open and run the notebook [generate_nutritional_values.ipynb](generate_nutritional_values.ipynb)
+   - Outputs will be written to [output/nutritional_profiles_parquet/](output/nutritional_profiles_parquet/)
 
 ## Usage
 
-### Stage 1: Local Execution
+Key flow:
 
-Run the Jupyter notebook for interactive development:
+- Place CSVs in [dataset/](dataset/)
+- Convert to Parquet with [convert_csvs_to_parquet.py](convert_csvs_to_parquet.py)
+- Optionally sample with [sample_datasets.py](sample_datasets.py)
+- Run Spark notebook [generate_nutritional_values.ipynb](generate_nutritional_values.ipynb)
 
-```bash
-jupyter lab notebooks/restaurant_recommendation_system.ipynb
-```
+## Outputs
 
-Or run the Python script:
+- Parquet: [output/nutritional_profiles_parquet/](output/nutritional_profiles_parquet/)
 
-```bash
-python scripts/stage1_local.py
-```
+## Notes
 
-The notebook includes:
-- Data loading and ETL
-- User preference and allergy processing
-- Restaurant-recipe mapping
-- Rating matrix generation
-- Train/test split (80/20)
-- ALS model training and optimization
-- Hyperparameter tuning to achieve target RMSE
-- Top 5 restaurant recommendations generation
+- Ensure Parquet inputs exist in [converted-dataset/](converted-dataset/) before running the notebook.
+- `pyarrow` is required for Parquet writes/reads in `pandas`.
 
-### Stage 2: Private Cloud Deployment
+## Roadmap
 
-For private cloud with limited resources and SSH-based data loading:
+- **Food statistics**
+  - Top foods by calories/gram, protein/calorie, protein/gram
+  - Fiber/calorie, lowest/highest sugar/gram, sodium/calorie
+  - Composite nutrient-density scoring
+- **Healthy recommendations from likes**
+  - Suggest similar-category foods optimizing health metrics (higher protein density, lower sugar/sodium, adequate fiber)
+  - Respect dietary filters (vegetarian/vegan, allergen exclusions)
+- **Goal-based ranking**
+  - Rank foods against macro/micro targets (e.g., 30g protein, <10g sugars per serving)
+- **Visual exploration**
+  - Plots and small dashboards for distributions and top-k lists
+- **Meal composition**
+  - Complementary foods to meet targets with minimal sugar/sodium
 
-1. **Configure SSH access**:
-   - Update `config/stage2_private_cloud.json` with your SSH credentials
-   - Ensure SSH keys are set up for passwordless access
+## Datasets
 
-2. **Run the script**:
-```bash
-python scripts/stage2_private_cloud.py
-```
+USDA FoodData Central (FDC) — download from: https://fdc.nal.usda.gov/download-datasets
+Place extracted CSVs under [dataset/](dataset/).
 
-The script uses round-robin method to load data from multiple remote hosts via SSH, distributing the load across available resources.
+## Processing Overview
 
-### Stage 3: GCP Dataproc Deployment
-
-1. **Set up GCP credentials**:
-```bash
-gcloud auth login
-gcloud config set project YOUR_PROJECT_ID
-```
-
-2. **Update configuration**:
-   - Edit `config/stage3_gcp_dataproc.json` with your GCP project details
-   - Set GCS bucket name
-
-3. **Deploy**:
-```bash
-chmod +x scripts/stage3_gcp_dataproc.sh
-./scripts/stage3_gcp_dataproc.sh
-```
-
-The script will:
-- Upload data to Google Cloud Storage
-- Create a Dataproc cluster
-- Submit the Spark job
-- Monitor job execution
-
-## Model Configuration
-
-The system uses ALS (Alternating Least Squares) with the following default parameters:
-
-- **Rank**: 10 (latent factors)
-- **Regularization Parameter**: 0.1
-- **Max Iterations**: 10
-- **Cold Start Strategy**: "drop"
-- **Target RMSE**: 0.88 - 0.92
-
-Hyperparameter optimization automatically searches for optimal parameters to achieve the target RMSE range.
-
-## Data Processing
-
-### User Data
-- Processes user allergies from `10_002_users-food_allergy.csv`
-- Extracts dietary restrictions (diabetes, celiac, lactose intolerance, obesity)
-- Creates user profiles for filtering
-
-### Restaurant Data
-- Loads restaurant information from `9558_restaurants.csv`
-- Includes ratings, cuisines, and location data
-
-### Recipe Data
-- Processes recipes from `2_231_151_recipes_data.csv`
-- Extracts ingredients for allergy/dietary filtering
-- Maps recipes to restaurants based on cuisine types
-
-### Nutrient Data
-- Loads food, nutrient, and food_nutrient data
-- Used for advanced filtering (e.g., calorie content for obesity)
+1. Convert CSVs to Parquet for efficient IO.
+2. (Optional) Sample a subset of foods and related tables.
+3. Use Spark to aggregate and pivot nutrient data to per-food profiles.
+4. Export final profiles to Parquet.
 
 ## Output
 
-The system generates:
-- **Trained Model**: Saved to `models/als_restaurant_recommendation_model/`
-- **Recommendations**: Top 5 restaurants per user
-- **Metrics**: RMSE, MAE, and other evaluation metrics
+- Final nutritional profiles in Parquet format under [output/nutritional_profiles_parquet/](output/nutritional_profiles_parquet/)
 
-## Performance Targets
+## Performance Notes
 
-- **RMSE**: 0.88 - 0.92 (target achieved through hyperparameter optimization)
-- **Training/Test Split**: 80/20
-- **Recommendations**: Top 5 restaurants per user
-- **Cold Start**: Handled via "drop" strategy
+- Processing speed depends on Parquet conversion and Spark config (memory, partitions).
 
 ## Troubleshooting
 
-### Common Issues
-
-1. **Java not found**: Ensure Java 8 or 11 is installed and JAVA_HOME is set
-2. **Memory errors**: Adjust Spark memory settings in configuration files
-3. **SSH connection issues**: Verify SSH keys and host accessibility for Stage 2
-4. **GCP authentication**: Ensure gcloud is authenticated and project is set
-
-### Spark Configuration
-
-Adjust memory and partition settings in configuration files:
-- `spark.executor.memory`: Memory per executor
-- `spark.driver.memory`: Driver memory
-- `spark.sql.shuffle.partitions`: Number of partitions for shuffles
+- Ensure `pyarrow` is installed for Parquet operations.
+- Verify Parquet files exist in [converted-dataset/](converted-dataset/) if Spark reads fail.
+- Adjust Spark memory: `spark.driver.memory`, `spark.executor.memory`.
 
 ## License
 
-This project is part of the Big Data Analytics course at FII.
+Educational project for Big Data Analytics (FII).
 
 ## Authors
 
 - Tedy Stoica, MISS2
 - Dan Frunza, MISS2
 - Iulian Gherghevici, MISS2
-
-

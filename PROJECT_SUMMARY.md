@@ -1,65 +1,40 @@
-# Project Summary: Restaurant Recommendation System
+# Project Summary: Food Nutritional Analysis (USDA FDC)
 
 ## Overview
 
-This project implements a comprehensive restaurant recommendation system using Apache Spark, PySpark, and SparkML with ALS (Alternating Least Squares) collaborative filtering. The system provides personalized restaurant recommendations based on user preferences, food allergies, dietary restrictions, and nutrient information.
+This project analyzes food composition and nutrients using the USDA FoodData Central (FDC) dataset. It converts the official CSVs to Parquet, optionally samples a manageable subset, and uses Apache Spark to aggregate and pivot nutrient values into comprehensive per-food profiles.
+
+You need the full dataset from: https://fdc.nal.usda.gov/download-datasets
 
 ## Key Features
 
-### 1. Collaborative Filtering with ALS
-- Implements Alternating Least Squares algorithm for matrix factorization
-- Optimizes hyperparameters to achieve RMSE between 0.88-0.92
-- Handles cold start problem with "drop" strategy
-- Generates top 5 restaurant recommendations per user
-
-### 2. User Profile Processing
-- Processes user allergies from anonymized data
-- Extracts dietary restrictions:
-  - Diabetes
-  - Celiac disease (gluten-free)
-  - Lactose intolerance
-  - Obesity considerations
-- Creates compatibility scores based on user profiles
-
-### 3. Data Integration
-- **Users**: 10,002 users with allergy and medical condition data
-- **Restaurants**: 9,558 restaurants with ratings and cuisine information
-- **Recipes**: 2.2M+ recipes with ingredient lists
-- **Nutrients**: Food composition and nutrient data
-- **Mappings**: Restaurant-recipe relationships based on cuisines
-
-### 4. Multi-Stage Deployment
-
-#### Stage 1: Local Execution
-- Simulates cluster with master + 2 workers
-- Uses local data files
-- Ideal for development and testing
-
-#### Stage 2: Private Cloud
-- SSH-based round-robin data loading
-- Handles limited resources by distributing data across workers
-- Loads data from remote hosts via SSH
-
-#### Stage 3: GCP Dataproc
-- Cloud-based execution on Google Cloud Platform
-- Uses Google Cloud Storage for data
-- Scalable cluster deployment
+1. **CSV → Parquet conversion** for efficient IO (`pandas` + `pyarrow`)
+2. **Sampling utility** to create smaller, consistent subsets
+3. **Spark aggregation and pivot** to build per-food nutrient profiles
+4. **Parquet export** of final nutritional profiles
 
 ## Technical Architecture
 
 ### Data Flow
-1. **Extract**: Load CSV files (users, restaurants, recipes, nutrients)
-2. **Transform**: 
-   - Process user allergies and dietary restrictions
-   - Map recipes to restaurants
-   - Filter restaurants based on user compatibility
-   - Generate user-restaurant rating matrix
-3. **Load**: 
-   - Split into training (80%) and test (20%) sets
-   - Train ALS model
-   - Generate recommendations
+
+1. **Extract**: Download FDC CSVs and place in [dataset/](dataset/)
+2. **Transform**:
+
+- Convert CSVs to Parquet in [converted-dataset/](converted-dataset/)
+- (Optional) Sample related tables to [sampled_dataset/](sampled_dataset/)
+
+3. **Load/Process (Spark)**:
+
+- Read Parquet inputs
+- Aggregate nutrient values per `fdc_id`
+- Pivot nutrients into wide profiles
+
+4. **Export**:
+
+- Write final profiles to [output/nutritional_profiles_parquet/](output/nutritional_profiles_parquet/)
 
 ### Model Training
+
 - **Algorithm**: ALS (Alternating Least Squares)
 - **Hyperparameters**:
   - Rank: 5-20 (latent factors)
@@ -68,98 +43,87 @@ This project implements a comprehensive restaurant recommendation system using A
 - **Optimization**: Grid search to achieve target RMSE
 - **Evaluation**: RMSE and MAE metrics
 
-### Recommendation Generation
-- Filters restaurants based on:
-  - User allergies
-  - Dietary restrictions
-  - Ingredient compatibility
-- Generates predicted ratings using trained model
-- Returns top 5 restaurants per user
+### Nutritional Profile Generation
+
+- Joins `food`, `food_nutrient`, `nutrient`, and related tables
+- Aggregates and pivots nutrient amounts into a single wide table per `fdc_id`
+- Outputs comprehensive Parquet dataset for downstream use
 
 ## File Structure
 
 ```
 FII-BDA/
-├── data/                          # CSV data files
-├── src/                           # Source code
-│   ├── data_processor.py          # ETL operations
-│   └── recommendation_engine.py   # ALS engine
-├── notebooks/                     # Jupyter notebook
-│   └── restaurant_recommendation_system.ipynb
-├── config/                        # Configuration files
-│   ├── stage1_local.json
-│   ├── stage2_private_cloud.json
-│   └── stage3_gcp_dataproc.json
-├── scripts/                       # Deployment scripts
-│   ├── stage1_local.py
-│   ├── stage2_private_cloud.py
-│   ├── stage3_gcp_dataproc.sh
-│   ├── main_dataproc.py
-│   ├── verify_setup.py
-│   └── run_notebook.py
-└── docs/                          # Documentation
-    ├── README.md
-    ├── QUICKSTART.md
-    └── PROJECT_SUMMARY.md
+├── dataset/                       # Official FDC CSVs (downloaded)
+├── converted-dataset/             # Parquet after conversion
+├── sampled_dataset/               # Optional Parquet subset
+├── output/                        # Results
+│   └── nutritional_profiles_parquet/
+├── convert_csvs_to_parquet.py     # CSV → Parquet converter
+├── sample_datasets.py             # Sampling (Parquet only)
+├── generate_nutritional_values.ipynb  # Spark processing
+├── README.md
+├── QUICKSTART.md
+└── PROJECT_SUMMARY.md
 ```
 
-## Performance Targets
+## Performance Notes
 
-- **RMSE**: 0.88 - 0.92 (achieved through hyperparameter optimization)
-- **Training/Test Split**: 80/20
-- **Recommendations**: Top 5 restaurants per user
-- **Cold Start**: Handled via "drop" strategy
+- Performance depends on Parquet conversion, Spark memory, and partitioning.
 
 ## Usage
 
-### Quick Start
-1. Install dependencies: `pip install -r requirements.txt`
-2. Verify setup: `python scripts/verify_setup.py`
-3. Run notebook: `jupyter lab notebooks/restaurant_recommendation_system.ipynb`
+1. Download FDC CSVs to [dataset/](dataset/): https://fdc.nal.usda.gov/download-datasets
+2. Convert to Parquet:
 
-### Stage 1 (Local)
 ```bash
-python scripts/stage1_local.py
+uv run python convert_csvs_to_parquet.py --input-dir dataset --output-dir converted-dataset
 ```
 
-### Stage 2 (Private Cloud)
+3. (Optional) Sample subset:
+
 ```bash
-# Configure SSH in config/stage2_private_cloud.json
-python scripts/stage2_private_cloud.py
+uv run python sample_datasets.py
 ```
 
-### Stage 3 (GCP Dataproc)
-```bash
-# Configure GCP in config/stage3_gcp_dataproc.json
-./scripts/stage3_gcp_dataproc.sh
-```
+4. Generate nutritional profiles:
+
+- Run [generate_nutritional_values.ipynb](generate_nutritional_values.ipynb)
 
 ## Technologies Used
 
-- **Apache Spark 3.5+**: Distributed computing framework
-- **PySpark**: Python API for Spark
-- **SparkML**: Machine learning library
-- **ALS**: Alternating Least Squares algorithm
-- **JupyterLab**: Interactive development environment
-- **Python 3.10+**: Programming language
+- **Apache Spark 3.5+**
+- **PySpark**
+- **Pandas + PyArrow** (Parquet conversion)
+- **JupyterLab**
+- **Python 3.10+**
 
 ## Data Sources
 
-1. **User Data**: Anonymized user profiles with allergies and medical conditions
-2. **Restaurant Data**: Global restaurant database with ratings and cuisines
-3. **Recipe Data**: Large-scale recipe database with ingredients
-4. **Nutrient Data**: Food composition and nutrient information
+- **USDA FoodData Central (FDC)**: Food composition and nutrient information
+  - Download: https://fdc.nal.usda.gov/download-datasets
 
 ## Future Enhancements
 
-- Real-time recommendation API
-- User feedback integration
-- Advanced filtering using nutrient data
-- A/B testing framework
-- Model versioning and monitoring
-- Integration with restaurant menu APIs
+- Add delta updates when new FDC releases drop
+- Validate units and conversions across tables
+- Provide lightweight APIs for profile queries
+
+### Planned Additions
+
+- **Food statistics**: Compute top foods by metrics such as:
+  - Calories per gram
+  - Protein per calorie
+  - Protein per gram
+  - Fiber per calorie
+  - Sugar per gram (lowest/highest)
+  - Sodium per calorie (lowest/highest)
+  - Nutrient density scores (composite)
+- **Healthy recommendations from likes**: Given a list of liked foods, suggest alternatives that maximize healthfulness under constraints (e.g., higher protein density, lower sugar/sodium, adequate fiber), while keeping similar categories.
+- **Dietary filters**: Support goals and constraints (e.g., high-protein, low-carb, low-sodium, vegetarian/vegan, allergen exclusions).
+- **Targets-based ranking**: Rank foods against user macro/micro targets (e.g., 30g protein, <10g sugars per serving).
+- **Visualization & dashboards**: Small notebook widgets/plots to explore distributions and top-k foods by metric.
+- **Meal composition hints**: Suggest complement foods to reach target macros with minimal sugar/sodium.
 
 ## License
 
 Educational project for Big Data Analytics course.
-

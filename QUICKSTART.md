@@ -1,13 +1,15 @@
-# Quick Start Guide
+# Quick Start Guide (Food Nutritional Analysis)
 
 ## Prerequisites
 
 1. **Java 8 or 11** (required for Spark)
+
    ```bash
    java -version
    ```
 
 2. **Python 3.10+**
+
    ```bash
    python --version
    ```
@@ -24,12 +26,8 @@
 
 1. **Clone/Download the project**
 
-2. **Install Python dependencies**:
-   ```bash
-   pip install -r requirements.txt
-   ```
-   
-   Or using uv:
+2. **Install Python dependencies** (uv recommended):
+
    ```bash
    uv sync
    ```
@@ -39,85 +37,50 @@
    pyspark --version
    ```
 
-## Running Stage 1 (Local)
+## Data Download (Required)
 
-### Option 1: Jupyter Notebook (Recommended)
+Download the full USDA FoodData Central (FDC) dataset (CSV) and extract into [dataset/](dataset/):
 
-1. Start JupyterLab:
-   ```bash
-   jupyter lab
-   ```
+- https://fdc.nal.usda.gov/download-datasets
+- Ensure files like `food.csv`, `nutrient.csv`, `food_nutrient.csv`, `food_portion.csv`, `measure_unit.csv` exist.
 
-2. Open `notebooks/restaurant_recommendation_system.ipynb`
+## Convert CSV to Parquet
 
-3. Run all cells (Cell → Run All)
-
-### Option 2: Python Script
+Use the provided converter to speed up processing:
 
 ```bash
-python scripts/stage1_local.py
+uv run python convert_csvs_to_parquet.py --input-dir dataset --output-dir converted-dataset
 ```
+
+## (Optional) Sample a Subset
+
+Create a smaller, related subset in Parquet:
+
+```bash
+uv run python sample_datasets.py
+```
+
+## Run Spark Notebook
+
+Generate comprehensive nutritional profiles:
+
+```bash
+jupyter lab
+```
+
+Open and run [generate_nutritional_values.ipynb](generate_nutritional_values.ipynb).
 
 ## Expected Output
 
-After running the notebook, you should see:
-
-1. **Data Loading**: Counts of users, restaurants, recipes
-2. **Model Training**: Progress of ALS training
-3. **Hyperparameter Optimization**: Testing different parameter combinations
-4. **Final Metrics**:
-   - RMSE: Should be between 0.88 - 0.92
-   - MAE: Mean Absolute Error
-   - Best parameters used
-5. **Recommendations**: Top 5 restaurants for sample users
+- Parquet files under [output/nutritional_profiles_parquet/](output/nutritional_profiles_parquet/)
+- Console counts for loaded datasets and aggregated results
 
 ## Troubleshooting
 
-### Issue: "Java not found"
-**Solution**: Install Java 8 or 11 and set JAVA_HOME:
-```bash
-export JAVA_HOME=/path/to/java
-```
+- Parquet operations require `pyarrow`.
+- Verify Parquet inputs exist in [converted-dataset/](converted-dataset/) if Spark reads fail.
+- Increase Spark memory via `spark.driver.memory` and `spark.executor.memory` in the notebook.
 
-### Issue: "Spark not found"
-**Solution**: Install Spark and set SPARK_HOME:
-```bash
-export SPARK_HOME=/path/to/spark
-export PATH=$SPARK_HOME/bin:$PATH
-```
+## Outputs
 
-### Issue: Memory errors
-**Solution**: Reduce data size in notebook or increase Spark memory:
-- Edit notebook cell with Spark session configuration
-- Increase `spark.executor.memory` and `spark.driver.memory`
-
-### Issue: Slow execution
-**Solution**: 
-- Reduce data samples (limit recipes/users)
-- Increase Spark partitions
-- Use smaller hyperparameter grid
-
-## Next Steps
-
-- **Stage 2**: Configure SSH access and run `scripts/stage2_private_cloud.py`
-- **Stage 3**: Set up GCP credentials and run `scripts/stage3_gcp_dataproc.sh`
-
-## Data Files
-
-Ensure all CSV files are in the `data/` directory:
-- `10_002_users-food_allergy.csv`
-- `9558_restaurants.csv`
-- `2_231_151_recipes_data.csv`
-- `food.csv`
-- `nutrient.csv`
-- `food_nutrient.csv`
-- And other required files
-
-## Model Output
-
-Trained models are saved to:
-- `models/als_restaurant_recommendation_model/`
-
-Recommendations are saved to:
-- `output/recommendations/`
-
+- Final profiles: [output/nutritional_profiles_parquet/](output/nutritional_profiles_parquet/)
