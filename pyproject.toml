@@ -1,9 +1,12 @@
 [project]
 name = "fii-bda"
 version = "0.1.0"
-description = "Add your description here"
+description = "Restaurant Recommendation System using Apache Spark and ALS Collaborative Filtering"
 readme = "README.md"
-requires-python = ">=3.13"
+requires-python = ">=3.10"
 dependencies = [
-    "pyspark>=4.0.1",
+    "pyspark>=3.5.0",
+    "numpy>=1.24.0",
+    "jupyter>=1.0.0",
+    "jupyterlab>=4.0.0",
 ]
