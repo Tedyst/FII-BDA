@@ -61,6 +61,45 @@ Values are illustrative; the full list contains 10 rows.
 | 214123| Chicken breast (roasted, skinless) | 165 | 31.0      | 0.188            | 0.000          | 0.000         | 0.000          | 0.024        | 0.227 |
 Values are examples; exact columns depend on which densities exist in your dataset.
 
+## Nutrient Density Explorer — [nutrient_density_explorer.ipynb](nutrient_density_explorer.ipynb)
+
+- What it does: explores Top‑K nutrient densities both per kcal and per 100g for selected nutrients (protein, fiber, sugar, fat, sodium), with optional WWEIA category filters. Displays styled tables and a bar chart; writes CSV and Parquet outputs per metric.
+- Steps (in order):
+  - Initialize Spark; read Parquet from [output/nutritional_profiles](output/nutritional_profiles).
+  - Detect columns: ID (`fdc_id`/`id`), Name (`description`/`food_name`/`name`/`brand_name`), Calories (`energy_kcal`/`kcal`/`1008`), nutrients (`protein_g`, `fiber_g`/`1079`, `carb_g`/`1005`, `sugar_g`/`2000`, `fat_g`/`1004`, `sodium_mg`/`1093`), optional weight in grams (`serving_size_g`/`gram_weight`), and optional category (`wweia_*`/`food_category`).
+  - Filter rows with positive calories.
+  - Compute densities:
+    - Per kcal: `nutrient_per_kcal = nutrient_g / kcal` (for sodium: `sodium_mg_per_kcal = sodium_mg / kcal`).
+    - Per 100g: if a weight column exists, `nutrient_per_100g = nutrient_g / weight_g * 100`; otherwise, treat nutrient values as already per 100g.
+  - Optional category filtering: include or exclude WWEIA categories if the category column exists; otherwise, filters are ignored with a message.
+  - Top‑K selection: order ascending/descending and limit to `top_k`, separately for per‑kcal and per‑100g.
+  - Display: styled Pandas table highlighting the selected metric plus a Top 10 bar chart.
+  - Outputs: per metric, write Top‑K to [output/NutrientDensityExplorer](output/NutrientDensityExplorer) under `<metric>/per_kcal_csv`, `<metric>/per_kcal_parquet`, `<metric>/per_100g_csv`, `<metric>/per_100g_parquet`. Batch cell can save all metrics at once.
+
+- Example output (table) — `protein` per kcal:
+
+| id    | name                                 | kcal | category                  | protein_per_kcal |
+|-------|--------------------------------------|------|---------------------------|------------------|
+| 214123| Chicken breast (roasted, skinless)   | 165  | Poultry                   | 0.188            |
+| 735221| Tuna (canned in water, drained)      | 116  | Fish and Shellfish        | 0.224            |
+Values are illustrative; exact categories depend on your dataset.
+
+- Example output (table) — `protein` per 100g:
+
+| id    | name                                 | kcal | category                  | protein_per_100g |
+|-------|--------------------------------------|------|---------------------------|------------------|
+| 214123| Chicken breast (roasted, skinless)   | 165  | Poultry                   | 31.0             |
+| 735221| Tuna (canned in water, drained)      | 116  | Fish and Shellfish        | 26.0             |
+If weight is available, values are normalized to 100g; otherwise the dataset’s values are used as‑is.
+
+- Example output (table) — `sodium` densities:
+
+| id    | name                                 | kcal | category                  | sodium_mg_per_kcal | sodium_mg_per_100g |
+|-------|--------------------------------------|------|---------------------------|-------------------|--------------------|
+| 600111| Canned soup (tomato)                 | 90   | Mixed Dishes              | 4.8               | 430                |
+| 600512| Cheese (cheddar)                     | 403  | Milk and Dairy Products   | 1.0               | 620                |
+Units: sodium per kcal in mg/kcal; sodium per 100g in mg/100g.
+
 ## Weekly Meal Plan (7 days, 3 meals/day) — [generate_meal_plan.ipynb](generate_meal_plan.ipynb)
 
 - What it does: builds a balanced 7‑day plan with 3 meals/day based on profile (gender, age, weight, height), activity, goal (loss/maintenance/gain), allergens/preferences, and pantry flags.
