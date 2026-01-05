@@ -3,8 +3,8 @@ import os
 import pandas as pd
 
 
-dataset_dir = "/home/tedy/Git/FII-BDA/converted-dataset"
-output_dir = "/home/tedy/Git/FII-BDA/sampled_dataset"
+dataset_dir = "converted-dataset"
+output_dir = "sampled_dataset"
 
 os.makedirs(output_dir, exist_ok=True)
 
