@@ -102,36 +102,44 @@ Units: sodium per kcal in mg/kcal; sodium per 100g in mg/100g.
 
 ## Weekly Meal Plan (7 days, 3 meals/day) — [generate_meal_plan.ipynb](generate_meal_plan.ipynb)
 
-- What it does: builds a balanced 7‑day plan with 3 meals/day based on profile (gender, age, weight, height), activity, goal (loss/maintenance/gain), allergens/preferences, and pantry flags.
+- What it does: builds a balanced 7‑day plan (3 meals/day) from your profile (gender, age, weight, height), activity, goal (loss/maintenance/gain), allergens/preferences, and pantry availability. Also produces a weekly Shopping List with items missing from your pantry.
 - Steps (in order):
-  - Read Parquet; detect columns for ID, Name, `kcal`, `protein_g`, `carb_g`, `fat_g`, and a text column.
-  - Filtering & flags: exclude allergens/dislikes; set `has_like` and `has_pantry` flags via keyword detection.
+  - Read Parquet; detect columns for ID, Name, `kcal`, `protein_g`, `carb_g`, `fat_g`, and a text column (ingredients/description).
+  - Filtering & flags: exclude allergens and dislikes; set `has_like` and `has_pantry` flags via case‑insensitive keyword detection against `likes` and `pantry_items`.
   - Targets & formulas (local to this notebook):
-    - BMR (Mifflin–St Jeor): `BMR = 10*w + 6.25*h - 5*a + s`, where `s=5` (male) or `s=-161` (female).
-    - TDEE: `TDEE = BMR * m`, with `m` in `{1.2, 1.375, 1.55, 1.725}` (sedentary/light/moderate/intense).
-    - Daily kcal by goal: `daily_kcal = TDEE * alpha`, with `alpha = 0.85` (loss), `1.0` (maintenance), `1.10` (gain).
+    - BMR (Mifflin–St Jeor): `BMR = 10*w + 6.25*h - 5*a + s`, with `s=5` (male) or `s=-161` (female).
+    - TDEE: `TDEE = BMR * m`, with `m ∈ {1.2, 1.375, 1.55, 1.725}` (sedentary/light/moderate/heavy).
+    - Daily kcal by goal: `daily_kcal = TDEE * α`, with `α = 0.85` (loss), `1.0` (maintenance), `1.10` (gain).
     - Macro grams: `protein_g = (daily_kcal * p_pct) / 4`, `carb_g = (daily_kcal * c_pct) / 4`, `fat_g = (daily_kcal * f_pct) / 9`.
-    - Meal kcal targets: `meal_kcal[m] = daily_kcal * meal_splits[m]` (e.g., `Breakfast=0.25, Lunch=0.4, Dinner=0.35` summing to `1.0`).
-    - Per‑kcal macro densities in the dataset: `protein_per_kcal = protein_g / kcal`, `carb_per_kcal = carb_g / kcal`, `fat_per_kcal = fat_g / kcal`.
-  - Numerical example (illustrative): male, 80 kg, 180 cm, 30 y/o, moderate activity ($m=1.55$), maintenance ($\alpha=1.0$).
-    - `BMR = 10*80 + 6.25*180 - 5*30 + 5 = 1780`.
-    - `TDEE = 1780 * 1.55 ≈ 2759 kcal/day`.
-    - If macro targets are `30% protein`, `40% carbs`, `30% fat`:
-      `protein_g = (2759*0.30)/4 ≈ 207 g`; `carb_g = (2759*0.40)/4 ≈ 276 g`; `fat_g = (2759*0.30)/9 ≈ 92 g`.
+    - Meal kcal targets: `meal_kcal[m] = daily_kcal * meal_splits[m]` (splits must sum to `1.0`).
+    - Per‑kcal macro densities used for matching: `protein_per_kcal = protein_g / kcal`, `carb_per_kcal = carb_g / kcal`, `fat_per_kcal = fat_g / kcal`.
   - Scoring (per meal):
-    - Macro proportion fit: normalize `(p, c, f)` to proportions `(pp, cp, fp)` and compute `macro_fit = 1 - (|pp - tp| + |cp - tc| + |fp - tf|)`.
+    - Macro proportion fit: normalize `(p, c, f)` per kcal to `(pp, cp, fp)` and compute `macro_fit = 1 - (|pp - tp| + |cp - tc| + |fp - tf|)`.
     - Calorie fit: `calorie_fit = max(0, 1 - |kcal - meal_kcal_target| / meal_kcal_target)`.
-    - Total: `Score = w_m*macro_fit + w_c*calorie_fit + bonuses - repeat_penalty` (e.g., `w_m=0.6`, `w_c=0.4`; bonuses for `has_like`/`has_pantry`).
-  - Plan assembly: convert candidates to Pandas, score against the current meal target, and select the highest‑scoring item for each meal on each day (7×3). Apply a small repeat penalty to encourage variety.
-  - Display & results: styled weekly table (Day, Meal, Name, `kcal`, `protein_g`, `carb_g`, `fat_g`, densities, score) and a stacked macro chart by day. Optionally write CSV/JSON to [output/MealPlan](output/MealPlan).
+    - Total: `Score = w_m*macro_fit + w_c*calorie_fit + like_bonus + pantry_bonus - repeat_penalty` (small penalty if the same food was already used that week).
+  - Plan assembly: convert candidates to Pandas, score against the current meal target, and pick the top‑scoring item for each meal on each day (7×3). Variety is encouraged via the repeat penalty.
+  - Display & results: styled weekly table (Day, Meal, Food, `Calories (kcal)`, macro densities, flags, score) and a stacked macro chart by day. When `write_outputs=True`, saves CSV and JSON to [output/MealPlan](output/MealPlan).
+
+- New: Weekly Shopping List
+  - Ingredients column: the notebook keeps both `Food` and `Ingredients` (if a dedicated ingredients text exists; otherwise falls back to description) to build the list.
+  - Extraction: parses the `Ingredients` text into items (comma‑separated, with simple cleanup), then removes any item that matches `pantry_items` (substring, case‑insensitive).
+  - Aggregation: counts remaining items across all selected meals for the week and shows a table `Ingredient, Count`.
+  - Saving: writes the table to [output/MealPlan/shopping_list.csv](output/MealPlan/shopping_list.csv) alongside the plan exports.
+  - Fallback: if no ingredients are available, the list contains unique foods from the plan that don’t match your pantry keywords.
+
+- Numerical example (illustrative): male, 80 kg, 180 cm, 30 y/o, moderate activity ($m=1.55$), maintenance ($\alpha=1.0$).
+  - `BMR = 10*80 + 6.25*180 - 5*30 + 5 = 1780`.
+  - `TDEE = 1780 * 1.55 ≈ 2759 kcal/day`.
+  - If macro targets are `30% protein`, `40% carbs`, `30% fat`:
+    `protein_g = (2759*0.30)/4 ≈ 207 g`; `carb_g = (2759*0.40)/4 ≈ 276 g`; `fat_g = (2759*0.30)/9 ≈ 92 g`.
 
 - Example output (table) — first 3 meals of Day 1:
 
-| Day   | Meal      | name                          | kcal | protein_g | carb_g | fat_g | protein_per_kcal | carb_per_kcal | fat_per_kcal | score |
-|-------|-----------|-------------------------------|------|-----------|--------|-------|------------------|---------------|--------------|-------|
-| Day 1 | Breakfast | Greek yogurt + berries        | 450  | 28.0      | 55.0   | 12.0  | 0.062            | 0.122         | 0.027        | 0.81  |
-| Day 1 | Lunch     | Grilled chicken salad         | 700  | 42.0      | 60.0   | 24.0  | 0.060            | 0.086         | 0.034        | 0.88  |
-| Day 1 | Dinner    | Salmon + quinoa + veggies     | 610  | 38.0      | 48.0   | 22.0  | 0.062            | 0.079         | 0.036        | 0.85  |
+| Day   | Meal      | Food                          | Calories (kcal) | Protein/kcal | Carb/kcal | Fat/kcal | Score |
+|-------|-----------|-------------------------------|-----------------|--------------|-----------|----------|-------|
+| Day 1 | Breakfast | Greek yogurt + berries        | 450             | 0.062        | 0.122     | 0.027    | 0.81  |
+| Day 1 | Lunch     | Grilled chicken salad         | 700             | 0.060        | 0.086     | 0.034    | 0.88  |
+| Day 1 | Dinner    | Salmon + quinoa + veggies     | 610             | 0.062        | 0.079     | 0.036    | 0.85  |
 Values are illustrative; scores depend on your settings (macro targets, `meal_splits`, bonuses).
 
 ## Why the plan stays balanced
