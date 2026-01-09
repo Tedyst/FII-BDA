@@ -63,42 +63,53 @@ Values are examples; exact columns depend on which densities exist in your datas
 
 ## Nutrient Density Explorer — [nutrient_density_explorer.ipynb](nutrient_density_explorer.ipynb)
 
-- What it does: explores Top‑K nutrient densities both per kcal and per 100g for selected nutrients (protein, fiber, sugar, fat, sodium), with optional WWEIA category filters. Displays styled tables and a bar chart; writes CSV and Parquet outputs per metric.
-- Steps (in order):
-  - Initialize Spark; read Parquet from [output/nutritional_profiles](output/nutritional_profiles).
-  - Detect columns: ID (`fdc_id`/`id`), Name (`description`/`food_name`/`name`/`brand_name`), Calories (`energy_kcal`/`kcal`/`1008`), nutrients (`protein_g`, `fiber_g`/`1079`, `carb_g`/`1005`, `sugar_g`/`2000`, `fat_g`/`1004`, `sodium_mg`/`1093`), optional weight in grams (`serving_size_g`/`gram_weight`), and optional category (`wweia_*`/`food_category`).
-  - Filter rows with positive calories.
-  - Compute densities:
-    - Per kcal: `nutrient_per_kcal = nutrient_g / kcal` (for sodium: `sodium_mg_per_kcal = sodium_mg / kcal`).
-    - Per 100g: if a weight column exists, `nutrient_per_100g = nutrient_g / weight_g * 100`; otherwise, treat nutrient values as already per 100g.
-  - Optional category filtering: include or exclude WWEIA categories if the category column exists; otherwise, filters are ignored with a message.
-  - Top‑K selection: order ascending/descending and limit to `top_k`, separately for per‑kcal and per‑100g.
-  - Display: styled Pandas table highlighting the selected metric plus a Top 10 bar chart.
-  - Outputs: per metric, write Top‑K to [output/NutrientDensityExplorer](output/NutrientDensityExplorer) under `<metric>/per_kcal_csv`, `<metric>/per_kcal_parquet`, `<metric>/per_100g_csv`, `<metric>/per_100g_parquet`. Batch cell can save all metrics at once.
+- What it does: ranks foods by nutrient density with a selectable unit (per kcal or per 100 kcal) and a broad set of nutrients. It uses strict, dataset‑specific schema mapping, optional category and text filters (allergens/dislikes), shows a styled table + horizontal bar chart, and can save Top‑K results per metric.
 
-- Example output (table) — `protein` per kcal:
+- Key configuration
+  - `unit_choice`: `'per_kcal'` or `'per_100kcal'` (default: `'per_100kcal'`).
+  - `selected_metric`: the nutrient shown on screen. `metrics_available` lists all candidates; `metric_use` toggles which ones are included in batch saves.
+  - `top_k`, `order_desc`: how many rows to show/save and sort direction.
+  - `save_outputs`, `show_chart`: write CSV/Parquet and render the chart.
+  - `category_filter`, `exclude_allergens`, `dislikes`: equality filter on category and substring exclusion in a text column.
+  - `strict_schema` + `schema_columns`: exact mappings for this dataset.
 
-| id    | name                                 | kcal | category                  | protein_per_kcal |
-|-------|--------------------------------------|------|---------------------------|------------------|
-| 214123| Chicken breast (roasted, skinless)   | 165  | Poultry                   | 0.188            |
-| 735221| Tuna (canned in water, drained)      | 116  | Fish and Shellfish        | 0.224            |
-Values are illustrative; exact categories depend on your dataset.
+- Columns and strict schema
+  - Base: ID → `fdc_id`; Name → `food_description`; Category → `food_type`; Energy → `energy`.
+  - Nutrients mapped (when present):
+    - Macros: `protein`, `carbs`, `total_fat`, `fiber`, `sugars`.
+    - Lipids detail: `saturated_fat`, `monounsaturated_fat`, `polyunsaturated_fat`, `trans_fat`.
+    - Sugars detail: `glucose`, `fructose`, `sucrose`, `lactose`.
+    - Other: `cholesterol`, `water`, `ash`, `alcohol`, `caffeine`.
+    - Minerals: `calcium`, `iron`, `magnesium`, `phosphorus`, `potassium`, `zinc`, `copper`, `manganese`, `selenium`.
+    - Vitamins: `vitamin_a`, `vitamin_c`, `vitamin_d`, `vitamin_e`, `vitamin_k`, `thiamin_b1`, `riboflavin_b2`, `niacin_b3`, `vitamin_b6`, `folate`, `vitamin_b12`, `choline`.
+    - Pigments: `beta_carotene`, `lycopene`, `lutein_zeaxanthin`.
+  - Text column for filters: prefer `ingredients`/`ingredients_text`, otherwise fall back to `food_description`.
+  - Detection does schema‑exact match first, then a small synonym fallback if missing.
 
-- Example output (table) — `protein` per 100g:
+- Densities and formulas
+  - Filter out rows with `energy > 0`.
+  - Per‑kcal for any nutrient `x`: `x_per_kcal = x / energy` (units follow `x`, e.g., mg/kcal for sodium).
+  - Per‑100kcal for readability: `x_per_100kcal = x_per_kcal * 100`.
+  - These columns are built for all available metrics so switching metrics/units is instant.
 
-| id    | name                                 | kcal | category                  | protein_per_100g |
-|-------|--------------------------------------|------|---------------------------|------------------|
-| 214123| Chicken breast (roasted, skinless)   | 165  | Poultry                   | 31.0             |
-| 735221| Tuna (canned in water, drained)      | 116  | Fish and Shellfish        | 26.0             |
-If weight is available, values are normalized to 100g; otherwise the dataset’s values are used as‑is.
+- Ranking, display, and UX
+  - Choose the nutrient and unit via small UI widgets (dropdown + toggle) or by setting variables in the config cell.
+  - Apply optional filters: `category_filter` equality, and substring exclusion via `exclude_allergens`/`dislikes` against the text column.
+  - Sort by the chosen metric column and take `top_k`.
+  - Display a styled Pandas table (index hidden) and a horizontal Top‑10 bar chart with wrapped labels and value annotations.
 
-- Example output (table) — `sodium` densities:
+- Saving outputs
+  - Path: [output/NutrientDensityExplorer](output/NutrientDensityExplorer)/`<metric>`/`<unit>_{csv|parquet}` where `<unit>` is `per_kcal` or `per_100kcal`.
+  - Batch save uses the same unit and includes the metrics enabled in `metric_use`.
 
-| id    | name                                 | kcal | category                  | sodium_mg_per_kcal | sodium_mg_per_100g |
-|-------|--------------------------------------|------|---------------------------|-------------------|--------------------|
-| 600111| Canned soup (tomato)                 | 90   | Mixed Dishes              | 4.8               | 430                |
-| 600512| Cheese (cheddar)                     | 403  | Milk and Dairy Products   | 1.0               | 620                |
-Units: sodium per kcal in mg/kcal; sodium per 100g in mg/100g.
+- Notes
+  - Per‑100g rankings are intentionally not displayed/exported to avoid unit inconsistencies in branded entries. Use kcal‑based units for consistent comparisons.
+  - If a nutrient column is truly missing, that metric is skipped (not added to `metrics_available`).
+
+- Example formulas
+  - `protein_per_kcal = protein / energy`
+  - `protein_per_100kcal = protein_per_kcal * 100`
+  - For sodium in mg: `sodium_per_kcal = sodium / energy` and `sodium_per_100kcal = sodium_per_kcal * 100`
 
 ## Weekly Meal Plan (7 days, 3 meals/day) — [generate_meal_plan.ipynb](generate_meal_plan.ipynb)
 
@@ -162,6 +173,16 @@ What it does: finds foods similar to a chosen reference item using a nutrient ve
 - `scaling`: `zscore` or `none` (see scaling formula below).
 - `exclude_allergens`, `dislikes`: keyword lists used for negative text filtering (ingredients/description).
 - `feature_config`: per‑nutrient dictionary with `use` (include in vector), `weight` (feature weight), and `constraint` (`None` | `less` | `more`). The detected column is attached at runtime as `column`.
+
+### Dataset‑Specific Schema (this repository)
+- `strict_schema`: defaults to `True`. When enabled, the notebook uses exact column names from this dataset via `schema_columns` and only falls back to fuzzy detection if a column is missing.
+- Core mappings used:
+  - ID → `fdc_id`; Name → `food_description`; Category → `food_type`.
+  - Energy → `energy`; Macros → `protein`, `carbs`, `total_fat`; Carbs detail → `sugars` (plus optional `glucose`, `fructose`, `sucrose`, `lactose`).
+  - Lipids detail → `saturated_fat`, `trans_fat`, `monounsaturated_fat`, `polyunsaturated_fat`; Cholesterol → `cholesterol`.
+  - Sodium → `sodium`; Selected minerals/vitamins (if present) → `potassium`, `calcium`, `iron`, `magnesium`, `phosphorus`, `zinc`, `copper`, `manganese`, `selenium`, and common vitamins (`vitamin_a`, `vitamin_c`, `vitamin_d`, `vitamin_e`, `vitamin_k`, `thiamin_b1`, `riboflavin_b2`, `niacin_b3`, `vitamin_b6`, `folate`, `vitamin_b12`).
+- Auto‑detect of extra nutrients: disabled when `strict_schema=True` to keep behavior deterministic. Set `strict_schema=False` to re‑enable scanning for additional vitamin/mineral columns.
+- Energy as a feature: usually keep disabled when `use_per_kcal=True` because energy/kcal equals 1 by construction.
 
 ### Column detection
 Algorithm: first exact (lowercased) match, then “contains” (lowercased) against common synonyms/codes:
