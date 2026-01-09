@@ -142,9 +142,83 @@ Units: sodium per kcal in mg/kcal; sodium per 100g in mg/100g.
 | Day 1 | Dinner    | Salmon + quinoa + veggies     | 610             | 0.062        | 0.079     | 0.036    | 0.85  |
 Values are illustrative; scores depend on your settings (macro targets, `meal_splits`, bonuses).
 
-## Why the plan stays balanced
+### Why the plan stays balanced
 
 - It simultaneously optimizes the macro mix and per‑meal calories. Very low‑calorie but unbalanced items (e.g., just an apple) score poorly on macro proportions and often on calorie fit—so they aren’t favored.
 - Like/pantry bonuses personalize choices, and a repeat penalty pushes diversity across the week.
+
+
+
+## Nutrient Similarity Search — [nutrient_similarity_search.ipynb](nutrient_similarity_search.ipynb)
+
+What it does: finds foods similar to a chosen reference item using a nutrient vector (macros + optional micronutrients), with configurable feature toggles, weights, and constraints (e.g., “less sodium”, “more protein”). It renders a styled table and a Top‑N chart, then saves results (CSV/JSON) plus a `meta.json` containing the active configuration.
+
+### Configuration (key variables)
+- `input_path`, `fallback_file`, `output_dir`: I/O paths.
+- `query_by_name` or `query_by_id`: how the reference item is selected (name substring, or exact ID).
+- `top_k`: number of candidates to keep after sorting.
+- `same_category_only`: restrict results to the reference item’s category (when present).
+- `use_per_kcal`: normalize features per kcal; otherwise use raw values (effectively per 100g as provided).
+- `scaling`: `zscore` or `none` (see scaling formula below).
+- `exclude_allergens`, `dislikes`: keyword lists used for negative text filtering (ingredients/description).
+- `feature_config`: per‑nutrient dictionary with `use` (include in vector), `weight` (feature weight), and `constraint` (`None` | `less` | `more`). The detected column is attached at runtime as `column`.
+
+### Column detection
+Algorithm: first exact (lowercased) match, then “contains” (lowercased) against common synonyms/codes:
+- ID: `fdc_id`, `id`
+- Name: `description`, `food_name`, `name`, `brand_name`
+- Energy (kcal): `energy_kcal`, `energy`, `kcal`, `calories`, or nutrient code `1008`
+- Macros: `protein_g`/`1003`, `carbohydrate_g`/`1005`, `fat_g`/`1004`
+- Carb details: `fiber_g`/`dietary_fiber`/`1079`, `sugar_g`/`2000`
+- Sodium: `sodium_mg`/`1093`
+- Category (optional): `food_category`, `wweia_food_category`, `category`
+- Free‑text (ingredients/description): `ingredients`, `ingredients_text`, `description`, `food_name`, `name`, `brand_name`
+- Micronutrients (if present): `calcium_mg`, `iron_mg`, `potassium_mg`, `magnesium_mg`, `zinc_mg`
+
+Auto‑detect: when `auto_detect_extra_nutrients=True`, scan all columns for nutrient‑like keywords (`vitamin`, `vit_`, `phosphorus`, `cholesterol`, etc.) and add new entries in `feature_config` with `use=False` and `weight=0.3`.
+
+### Densities (per kcal / per 100g)
+- Filter rows with `kcal > 0`.
+- Per‑kcal density for nutrient `x` (g or mg): `x_per_kcal = x / kcal`.
+- Per 100g mode: if `use_per_kcal=False`, keep the dataset’s raw values (typically per 100g) without dividing by kcal.
+- Missing nutrient columns (`use=True` but column absent): insert a literal `0.0` to keep the feature vector shape consistent.
+
+### Feature matrix, scaling, and weighting
+- Collect the selected feature columns (those with `use=True`) into matrix `X` (N×D).
+- Scaling `zscore` (per column): `z = (x - mean) / std`. When `std <= 1e-12`, set `std = 1.0` for stability. If `scaling="none"`, then `mean=0` and `std=1` (no change).
+- Weighting: multiply each column by its `weight` from `feature_config`.
+- Row norms: `row_norm = ||X_i|| = sqrt(sum_j X_ij^2) + 1e-12` (the small term avoids division by zero).
+
+### Selecting the reference item
+- By ID: compare `ID` (as string) against `query_by_id` (exact equality).
+- By name: look for `query_by_name` as a substring in the `Food` column (lowercased `contains`); take the first match. If `Food` is duplicated (from renaming), use the first sub‑column.
+- Save `q_idx` (row index in `pdf`), `q_vec` (1×D vector), `q_norm` (its norm), `q_name`, and `q_cat`.
+
+### Similarity (cosine)
+- Formula: `sim(i) = (X_i · X_q) / (||X_i|| * ||X_q||)`.
+- Set `sim(q_idx) = -1.0` to exclude the reference item from results.
+- Sort descending and take `top_k` candidates.
+
+### Constraints and filters
+- Per‑nutrient constraints: for each used nutrient `k`, if `constraint='less'`, require `cand[k] <= q[k]`; if `constraint='more'`, require `cand[k] >= q[k]`. The reference value `q[k]` comes from the selected density column (per kcal or per 100g).
+- Same category only: if `same_category_only=True` and `Category` exists, keep only `Category == q_cat`.
+- Text filters: in `Text` (ingredients/description), drop any row containing any term from `exclude_allergens` or `dislikes` (lowercased `contains`).
+- Percent deltas (transparency): for each used nutrient `k`, `Delta k (%) = ((cand[k] - q[k]) / (q[k] + 1e-12)) * 100`.
+
+### Result columns
+- `ID`, `Food`, optional `Category`.
+- `Similarity` (cosine).
+- Actual nutrient values used (e.g., `protein_per_kcal`, `sodium_mg_per_kcal`, etc.).
+- `Delta k (%)` for each active nutrient.
+
+### Visualization and saving
+- Pandas `Styler` table: hidden index, formatting for `Similarity` and selected `Delta` columns (e.g., Protein, Sodium), and a green gradient over `Similarity`.
+- “Top‑N Similarity” chart: horizontal bar chart for the first `top_n_chart` items with title “Top similar (to <q_name>)”.
+- Saving: under [output/SimilaritySearch/<slug>](output/SimilaritySearch) write `similar_results.csv`, `similar_results.json`, and `meta.json` (containing `query`, `config`, `features_used`, and the `feature_config` with attached detected columns).
+
+### Practical notes
+- If many rows have near‑identical values (after `zscore` and weighting), cosine scores can approach 1. Adjust `feature_config` (select relevant nutrients, tune `weight`) and/or enable `same_category_only` and text filters to narrow the search.
+- Ensure the reference item is excluded (explicitly set with `sims[q_idx] = -1`).
+- When a nutrient is missing, it enters the vector as zero—shape stays consistent, but that nutrient won’t influence similarity unless given a non‑zero weight (in which case zero can lower similarity versus rows with high values for that nutrient).
 
 
