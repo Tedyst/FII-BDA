@@ -288,3 +288,43 @@ Auto‑detect: when `auto_detect_extra_nutrients=True`, scan all columns for nut
 - When a nutrient is missing, it enters the vector as zero—shape stays consistent, but that nutrient won’t influence similarity unless given a non‑zero weight (in which case zero can lower similarity versus rows with high values for that nutrient).
 
 
+
+# Nutritional Outlier Analysis — [nutritional_outlier_analysis.ipynb](nutritional_outlier_analysis.ipynb)
+
+- **What it does:** Detects foods with extreme (high or low) values for key nutrients using the IQR (interquartile range) method, visualizes outliers, and provides dietary recommendations for deficiencies or restrictions (e.g., iron deficiency, sodium restriction). All logic is implemented in PySpark with strict schema mapping, and results are saved for further analysis.
+
+- **Steps (in order):**
+  - **Imports and Spark session:** Uses PySpark for all ETL and analytics, pandas/matplotlib for visualization.
+  - **Configuration:**
+    - Input/output paths for Parquet data.
+    - `schema_columns`: strict mapping for all relevant columns (ID, name, category, energy, macros, minerals, vitamins).
+    - `nutrient_cols`: list of nutrients to analyze for outliers.
+  - **Data loading and schema mapping:** Reads Parquet, applies strict schema mapping, selects only relevant columns, and ensures all nutrients are cast to numeric types.
+  - **Outlier detection:** For each nutrient, computes the IQR and identifies foods with values outside [Q1 - 1.5*IQR, Q3 + 1.5*IQR] as low/high outliers.
+  - **Visualization:** Plots bar charts for top high/low outliers for any nutrient (e.g., top 10 high sodium foods).
+  - **Dietary recommendations:** Provides lists of foods suitable for deficiencies (e.g., high iron) or restrictions (e.g., low sodium) by leveraging detected outliers.
+  - **Saving results:** All outlier and recommendation tables are saved as CSV and Parquet in [output/NutritionalOutlierAnalysis](output/NutritionalOutlierAnalysis).
+
+- **Key configuration:**
+  - `schema_columns`: strict mapping for all relevant columns.
+  - `nutrient_cols`: list of nutrients to analyze.
+
+- **Outputs:**
+  - CSV and Parquet files for each nutrient's high/low outliers and for each recommendation type.
+  - Bar chart visualizations for selected outlier groups.
+  - Printed tables of recommended foods for deficiencies/restrictions.
+
+- **Example output (table):**
+
+| id    | name                        | category      | iron | sodium |
+|-------|-----------------------------|--------------|------|--------|
+| 12345 | Beef liver                  | Meat          | 6.5  | 70     |
+| 67890 | Spinach (cooked)            | Vegetables    | 3.6  | 50     |
+| ...   | ...                         | ...           | ...  | ...    |
+
+**Example: Top 10 high iron foods and Top 10 low sodium foods are saved and visualized.**
+
+- **Notes:**
+  - The notebook is modular and can be extended to include more nutrients or custom outlier logic.
+  - All logic is performed in PySpark except for the final visualization (matplotlib/pandas).
+  - Structure and approach are consistent with the correlation and similarity search notebooks for reproducibility.
