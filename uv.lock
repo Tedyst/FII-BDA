@@ -623,7 +623,11 @@ requires-dist = [
     { name = "matplotlib", specifier = ">=3.10.8" },
     { name = "pandas", specifier = ">=2.3.3" },
     { name = "pyarrow", specifier = ">=22.0.0" },
+<<<<<<< HEAD
     { name = "pyspark", specifier = "==3.5.0" },
+=======
+    { name = "pyspark", specifier = ">=3.5.0" },
+>>>>>>> dc33cc4 (Healthiness Scores)
     { name = "seaborn", specifier = ">=0.13.2" },
 ]
 

@@ -328,3 +328,63 @@ Auto‑detect: when `auto_detect_extra_nutrients=True`, scan all columns for nut
   - The notebook is modular and can be extended to include more nutrients or custom outlier logic.
   - All logic is performed in PySpark except for the final visualization (matplotlib/pandas).
   - Structure and approach are consistent with the correlation and similarity search notebooks for reproducibility.
+
+## Healthiness & Processing Scores — [healthiness_processing_scores.ipynb](healthiness_processing_scores.ipynb)
+
+- **What it does:** Computes a composite healthiness or processing score for each food using PySpark, strict schema mapping, and the same data source as the outlier analysis. Results are visualized and saved to output/HealthinessScores.
+
+- **Steps (in order):**
+  - **Imports and Spark session:** Uses PySpark for all ETL and analytics, matplotlib for visualization.
+  - **Configuration:**
+    - Input/output paths for Parquet data.
+    - `schema_columns`: strict mapping for all relevant columns (ID, name, category, energy, macros, etc.).
+    - `nutrient_cols`: list of nutrients to use in scoring.
+  - **Data loading and schema mapping:** Reads Parquet, applies strict schema mapping, selects only relevant columns, and ensures all nutrients are cast to numeric types.
+    - If the `processing_level` column (NOVA score: 1=unprocessed, 4=ultra-processed) is missing, it is automatically added with value 1 (all foods considered unprocessed by default).
+  - **Processing score:**
+    - `processing_score = processing_level` (from data, or 1 if missing).
+  - **Nutritional density score:**
+    - Formula: `density_score = (fiber + protein) / (energy + sugar + fat)` (all values per 100g or as present in the dataset).
+  - **Composite healthiness score:**
+    - Formula: `healthiness_score = density_score - 0.25 * (processing_score - 1)`
+    - This means higher density and lower processing yield a higher (healthier) score.
+  - **Visualization:**
+    - Histogram of healthiness scores.
+    - Bar chart: Top 10 healthiest foods (by composite score).
+    - Bar chart: Top 10 most processed foods (by processing score).
+  - **Saving results:**
+    - Full table of scores and rankings saved as CSV and Parquet in [output/HealthinessScores](output/HealthinessScores).
+
+- **Key configuration:**
+  - `schema_columns`: strict mapping for all relevant columns.
+  - `nutrient_cols`: list of nutrients to use in scoring.
+
+- **Outputs:**
+  - CSV and Parquet files with all scores and rankings.
+  - Visualizations for healthiness and processing scores.
+
+- **Formulas used:**
+  - **Processing score:**
+    - `processing_score = processing_level` (from data, or 1 if missing)
+  - **Nutritional density score:**
+    - `density_score = (fiber + protein) / (energy + sugar + fat)`
+  - **Composite healthiness score:**
+    - `healthiness_score = density_score - 0.25 * (processing_score - 1)`
+
+- **How processing_level is handled:**
+  - If the column is missing in your data, the script adds `processing_level = 1` for all foods (treats all as unprocessed by default).
+  - If you want more accurate processing scores, you must add or infer this column in your data.
+
+- **Notes:**
+  - All logic is performed in PySpark except for the final visualization (matplotlib/pandas).
+  - Structure and approach are consistent with the outlier and correlation analysis notebooks for reproducibility.
+  - You can customize the formulas or add more logic for processing_level assignment as needed.
+
+- **Example output (table):**
+
+| id    | name                        | category      | density_score | processing_score | healthiness_score |
+|-------|-----------------------------|--------------|--------------|------------------|-------------------|
+| 1109427 | SMOKEY TERIYAKI BEEF JERKY | branded_food | 0.10         | 1                | 0.10              |
+| ...   | ...                         | ...          | ...          | ...              | ...               |
+
+**Example: If processing_level is missing, all foods get processing_score=1 and healthiness_score=density_score.**
