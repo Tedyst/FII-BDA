@@ -1,15 +1,60 @@
+# Nutritional Correlation Analysis — [nutritional_correlation_analysis.ipynb](nutritional_correlation_analysis.ipynb)
+
+- **What it does:** Computes and visualizes correlations between nutrients in foods using PySpark, with strict schema mapping. Useful for research, product development, or exploring hidden associations in food composition data.
+
+- **Steps (in order):**
+  - **Imports and Spark session:** Uses PySpark for data processing, pandas for correlation, seaborn/matplotlib for visualization.
+  - **Configuration:** 
+    - Input/output paths for Parquet data.
+    - `schema_columns`: strict mapping for all relevant columns (ID, name, category, energy, macros, lipids, minerals, vitamins).
+    - `nutrient_cols`: list of nutrients to include in the correlation matrix.
+  - **Data loading and schema mapping:** Reads Parquet, applies strict schema mapping (missing columns are filled with nulls).
+  - **Filtering:** Optionally restricts to a food category or applies text filters (template code provided).
+  - **Preparation:** Selects only nutrient columns, drops rows with too many missing values (requires at least 3 non-null nutrients).
+  - **Correlation computation:** Collects data to pandas and computes the Pearson correlation matrix for the selected nutrients.
+  - **Visualization:** Plots the correlation matrix as a heatmap using seaborn.
+  - **Strong correlation extraction:** Extracts and displays all nutrient pairs with strong correlations (|r| > 0.5, off-diagonal).
+  - **Interpretation:** Provides guidance on interpreting positive/negative correlations and their practical implications.
+
+- **Key configuration:**
+  - `schema_columns`: strict mapping for all relevant columns.
+  - `nutrient_cols`: list of nutrients to include in the analysis.
+  - `min_valid`: minimum number of non-null nutrients required per row (default: 3).
+
+- **Outputs:**
+  - Printed correlation matrix.
+  - Heatmap visualization.
+  - List of nutrient pairs with strong correlations (|r| > 0.5).
+
+- **Example output (strong correlations):**
+
+```
+Nutrient pairs with strong correlations (|r| > 0.5):
+protein - sodium: r = 0.68
+carb - sugar: r = 0.82
+fat - saturated_fat: r = 0.77
+fiber - carb: r = 0.54
+calcium - vitamin_b12: r = 0.51
+```
+Values are illustrative; actual results depend on your dataset.
+
+- **Notes:**
+  - The notebook is modular and can be extended with additional filters or nutrients.
+  - All logic is performed in PySpark except for the final correlation and plotting (done in pandas/seaborn).
+  - Structure and approach are similar to the nutrient similarity search notebook for consistency.
 # Detailed Notebook Overview
 
 This document explains, one by one, what each notebook does, the exact steps implemented inside, and the formulas used locally in that notebook. No prerequisites are included here. All formulas are written in plain text (no LaTeX) to avoid rendering issues on GitHub.
 
+
 ## Top 10 Protein per Kcal — [generate_top10_prot_per_kcal.ipynb](generate_top10_prot_per_kcal.ipynb)
 
-- What it does: finds the 10 foods with the highest protein density (grams of protein per kcal).
+- What it does: Finds the 10 foods with the highest protein density (grams of protein per kcal).
 - Steps (in order):
   - Initialize Spark and read Parquet from [output/nutritional_profiles](output/nutritional_profiles). If the folder is missing, fall back to a specific part file in the same area.
-  - Detect required columns via exact and then contains matching (case‑insensitive):
+  - Detect required columns via exact and then contains matching (case-insensitive):
     - ID: `fdc_id`, `id`.
-    - Name: `description`, `food_name`, `name`, `brand_name`.
+    - Name: `description`, `food_name`, `name`.
     - Calories (kcal): `energy_kcal`, `energy`, `kcal`, `calories`, or nutrient code `1008`.
     - Protein (g): `protein_g`, `protein`, or nutrient code `1003`.
   - Filter rows with `kcal > 0`.
@@ -17,7 +62,7 @@ This document explains, one by one, what each notebook does, the exact steps imp
   - Sort descending by `protein_per_kcal` and take Top 10.
   - Write results as CSV and Parquet to [output/Top10_bestfoods_prots_per_kcal](output/Top10_bestfoods_prots_per_kcal).
 - Saved fields: ID, Name, `kcal`, `protein_g`, `protein_per_kcal`.
-- Notes: when scores tie, ordering is determined by the DataFrame’s implicit secondary sort (ID/Name).
+- Notes: If scores tie, ordering is determined by the DataFrame’s implicit secondary sort (ID/Name).
 
 - Example output (table):
 
