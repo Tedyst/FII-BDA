@@ -1,4 +1,5 @@
 
+
 ## scripts/nutritional_correlation_analysis.ipynb
 
 This notebook analyzes correlations between nutrients using PySpark and pandas, with a strict column mapping. Each cell has the following role:
@@ -314,11 +315,11 @@ This script suggests recipe ideas based on the ingredients you have, your dislik
 
 For more details, see the notebook `scripts/recipe_ideas.ipynb`.
 
-## Model-based Scripts
+# Model-based Scripts
 
 This section contains scripts that use machine learning or NLP models for advanced recommendations or similarity search.
 
-### scripts/semantic_similarity_nlp.ipynb
+## scripts/semantic_similarity_nlp.ipynb
 
 This notebook recommends foods/products that are semantically similar to a given query (e.g., a product name and its ingredients), using a modern NLP model.
 
@@ -359,3 +360,50 @@ This notebook recommends foods/products that are semantically similar to a given
 
 **Summary:**
 - This script enables semantic product recommendations using state-of-the-art NLP embeddings, making it possible to find similar foods even if they don't share exact keywords or ingredient names.
+
+## scripts/ingredient_clustering_embeddings.ipynb
+
+This notebook clusters ingredients using Sentence Transformers embeddings and KMeans, visualizes the clusters, and saves grouped ingredient lists and example foods to CSV files. PySpark is used for data loading and ingredient-food mapping.
+
+**Model Used:**
+- [Sentence Transformers](https://www.sbert.net/) – `all-MiniLM-L6-v2` for embedding ingredient names into dense vectors.
+- [KMeans Clustering](https://scikit-learn.org/stable/modules/generated/sklearn.cluster.KMeans.html) – for grouping similar ingredients based on their embeddings.
+
+**How the Model Works:**
+- Each unique ingredient name is embedded into a high-dimensional vector using the transformer model, capturing semantic similarity.
+- KMeans clusters these vectors into groups of similar ingredients (e.g., spices, grains, sweeteners).
+- Each cluster can be interpreted as a category of semantically similar ingredients.
+
+**Cell-by-cell breakdown:**
+
+1. **Imports**
+  - Loads pandas, numpy, PySpark, Sentence Transformers, KMeans, matplotlib, seaborn, and os.
+
+2. **PySpark Session and Data Loading**
+  - Initializes Spark session.
+  - Loads the ingredients dataset (Parquet format) with schema enforcement.
+
+3. **Explode Ingredients and Build Ingredient-Food Mapping**
+  - Uses PySpark to explode the ingredient lists and map each ingredient to the foods it appears in.
+  - Aggregates foods per ingredient and converts to pandas DataFrame.
+
+4. **Clean and Deduplicate Ingredient Names**
+  - Normalizes ingredient names (lowercase, strip) and removes duplicates.
+
+5. **Embed Ingredient Names**
+  - Uses Sentence Transformers to embed each unique ingredient name into a vector.
+
+6. **Cluster Ingredients**
+  - Applies KMeans to the ingredient embeddings to assign each ingredient to a cluster/category.
+
+7. **Visualize Clusters**
+  - Reduces embeddings to 2D with PCA and visualizes clusters using seaborn scatterplot.
+
+8. **Show Example Ingredients and Foods per Cluster**
+  - For each cluster, prints sample ingredient names and example foods.
+
+9. **Save Clustered Ingredients and Foods to CSVs**
+  - For each cluster, saves a CSV file with the ingredient names and example foods in `output/ingredient_categories/`.
+
+**Summary:**
+- This script enables unsupervised grouping of ingredients into semantic categories, provides visualizations, and exports the results for further analysis or use in downstream applications.
