@@ -1,3 +1,4 @@
+
 ## scripts/nutritional_correlation_analysis.ipynb
 
 This notebook analyzes correlations between nutrients using PySpark and pandas, with a strict column mapping. Each cell has the following role:
@@ -313,3 +314,48 @@ This script suggests recipe ideas based on the ingredients you have, your dislik
 
 For more details, see the notebook `scripts/recipe_ideas.ipynb`.
 
+## Model-based Scripts
+
+This section contains scripts that use machine learning or NLP models for advanced recommendations or similarity search.
+
+### scripts/semantic_similarity_nlp.ipynb
+
+This notebook recommends foods/products that are semantically similar to a given query (e.g., a product name and its ingredients), using a modern NLP model.
+
+**Model Used:**
+- [Sentence Transformers](https://www.sbert.net/) – specifically, the `all-MiniLM-L6-v2` model, a fast and efficient transformer-based model for generating dense semantic embeddings of text.
+
+**How the Model Works:**
+- The model converts each product's name and ingredient list into a single text string (e.g., "Product Name. Ingredients: ...").
+- It generates a vector embedding for each product using the transformer model.
+- For a user query (e.g., a product description and ingredients), the model generates an embedding and computes cosine similarity with all product embeddings.
+- The top-N most similar products are recommended, based on semantic meaning, not just keyword overlap.
+
+**Cell-by-cell breakdown:**
+
+1. **Imports**
+  - Loads pandas, numpy, and Sentence Transformers libraries.
+
+2. **Load Data**
+  - Loads the ingredients dataset (Parquet format) using pandas.
+  - Keeps only the product ID, description, and ingredient list.
+
+3. **Create Text for Embedding**
+  - Defines a function to join the ingredient list into a string.
+  - Creates a new column combining the product description and ingredients into a single text string for each product.
+
+4. **Load Embedding Model**
+  - Loads the `all-MiniLM-L6-v2` Sentence Transformer model.
+
+5. **Compute Embeddings**
+  - Computes the embedding vector for each product's combined text.
+
+6. **Recommendation Function**
+  - Defines a function that takes a query (product description + ingredients), encodes it, computes cosine similarity to all products, and returns the top-N most similar products.
+
+7. **Usage Example**
+  - Shows how to use the function to recommend products similar to a given query.
+  - Displays the results with similarity scores.
+
+**Summary:**
+- This script enables semantic product recommendations using state-of-the-art NLP embeddings, making it possible to find similar foods even if they don't share exact keywords or ingredient names.
