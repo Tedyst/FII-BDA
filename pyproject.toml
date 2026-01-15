@@ -3,7 +3,7 @@ name = "fii-bda"
 version = "0.1.0"
 description = "Restaurant Recommendation System using Apache Spark and ALS Collaborative Filtering"
 readme = "README.md"
-requires-python = ">=3.10"
+requires-python = ">=3.10,<3.11"
 dependencies = [
     "jupyter>=1.1.1",
     "jupyterlab>=4.5.1",

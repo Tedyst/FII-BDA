@@ -1,409 +1,245 @@
+# Detailed Notebook Overview
+
+This document explains, one by one, what each notebook does, the exact steps implemented inside, and the formulas used locally in that notebook. No prerequisites are included here. All formulas are written in plain text (no LaTeX) to avoid rendering issues on GitHub.
+
+## Top 10 Protein per Kcal — [generate_top10_prot_per_kcal.ipynb](generate_top10_prot_per_kcal.ipynb)
+
+- What it does: finds the 10 foods with the highest protein density (grams of protein per kcal).
+- Steps (in order):
+  - Initialize Spark and read Parquet from [output/nutritional_profiles](output/nutritional_profiles). If the folder is missing, fall back to a specific part file in the same area.
+  - Detect required columns via exact and then contains matching (case‑insensitive):
+    - ID: `fdc_id`, `id`.
+    - Name: `description`, `food_name`, `name`, `brand_name`.
+    - Calories (kcal): `energy_kcal`, `energy`, `kcal`, `calories`, or nutrient code `1008`.
+    - Protein (g): `protein_g`, `protein`, or nutrient code `1003`.
+  - Filter rows with `kcal > 0`.
+  - Compute density: `protein_per_kcal = protein_g / kcal`.
+  - Sort descending by `protein_per_kcal` and take Top 10.
+  - Write results as CSV and Parquet to [output/Top10_bestfoods_prots_per_kcal](output/Top10_bestfoods_prots_per_kcal).
+- Saved fields: ID, Name, `kcal`, `protein_g`, `protein_per_kcal`.
+- Notes: when scores tie, ordering is determined by the DataFrame’s implicit secondary sort (ID/Name).
+
+- Example output (table):
+
+| fdc_id | name                                   | kcal | protein_g | protein_per_kcal |
+|--------|----------------------------------------|------|-----------|------------------|
+| 214123 | Chicken breast (roasted, skinless)     | 165  | 31.0      | 0.188            |
+| 735221 | Tuna (canned in water, drained)        | 116  | 26.0      | 0.224            |
+Values are illustrative; the full list contains 10 rows.
+
+## Configurable Recommendations — [generate_recommendations.ipynb](generate_recommendations.ipynb)
+
+- What it does: produces a Top‑K based on filters (allergens/keywords, calorie range) and either a single sort field or a composite score.
+- Steps (in order):
+  - Read Parquet and detect columns for ID, Name, `kcal`, `protein_g`, optional `fiber_g` (code `1079`), `carb_g` (`1005`), `sugar_g` (`2000`), `fat_g` (`1004`), and a text column (usually `ingredients` or `description`).
+  - Filtering:
+    - Exclusions (allergens/words): drop rows where the text contains any excluded term.
+    - Inclusions: flag rows where the text contains preferred terms; if `must_include=True`, keep only those.
+    - Calorie range: keep `kcal` in `[calorie_min, calorie_max]`.
+  - Per‑kcal densities for each available nutrient: `density = nutrient_g / kcal`.
+  - Ranking (two paths):
+    - Single‑field sort: set `sort_by` (e.g., `protein_per_kcal`, `fiber_per_kcal`, `sugar_per_kcal`, `fat_per_kcal`) and direction (desc/asc).
+    - Composite score (when `sort_by` is empty):
+      `Score = sum(w_i * density_i) + w_include * has_included`.
+      Here `w_i` are your weights for protein/fiber/carb/sugar/fat, and `has_included` is `1` if the row has included terms, else `0`.
+      Example: if `protein_per_kcal=0.12`, `fiber_per_kcal=0.03`, `fat_per_kcal=0.01`, weights `(w_p,w_f,w_fat)=(1.0, 0.5, 0.2)` and bonus `w_include=0.1` (with included terms), then `Score = 1.0*0.12 + 0.5*0.03 + 0.2*0.01 + 0.1*1 = 0.237`.
+  - Notebook output: a styled Pandas table that colors the chosen metric (`sort_by`, or `Score` when using composite scoring) and a chart based on the same metric. The index is hidden with a compatibility‑safe approach across Pandas versions.
+  - Write results: CSV + Parquet to [output/Recommendations](output/Recommendations), including base fields + densities and `Score` (if applicable).
+
+- Example output (table) — with `sort_by="protein_per_kcal"`:
+
+| id    | name                                 | kcal | protein_g | protein_per_kcal | fiber_per_kcal | carb_per_kcal | sugar_per_kcal | fat_per_kcal |
+|-------|--------------------------------------|------|-----------|------------------|----------------|---------------|----------------|--------------|
+| 214123| Chicken breast (roasted, skinless)   | 165  | 31.0      | 0.188            | 0.000          | 0.000         | 0.000          | 0.024        |
+| 735221| Tuna (canned in water, drained)      | 116  | 26.0      | 0.224            | 0.000          | 0.000         | 0.000          | 0.009        |
+
+- Example output (table) — with composite `Score`:
+
+| id    | name                          | kcal | protein_g | protein_per_kcal | fiber_per_kcal | carb_per_kcal | sugar_per_kcal | fat_per_kcal | Score |
+|-------|--------------------------------|------|-----------|------------------|----------------|---------------|----------------|--------------|-------|
+| 498311| Greek yogurt (plain, nonfat)   | 59   | 10.3      | 0.175            | 0.000          | 0.081         | 0.032          | 0.000        | 0.231 |
+| 214123| Chicken breast (roasted, skinless) | 165 | 31.0      | 0.188            | 0.000          | 0.000         | 0.000          | 0.024        | 0.227 |
+Values are examples; exact columns depend on which densities exist in your dataset.
+
+## Nutrient Density Explorer — [nutrient_density_explorer.ipynb](nutrient_density_explorer.ipynb)
+
+- What it does: ranks foods by nutrient density with a selectable unit (per kcal or per 100 kcal) and a broad set of nutrients. It uses strict, dataset‑specific schema mapping, optional category and text filters (allergens/dislikes), shows a styled table + horizontal bar chart, and can save Top‑K results per metric.
+
+- Key configuration
+  - `unit_choice`: `'per_kcal'` or `'per_100kcal'` (default: `'per_100kcal'`).
+  - `selected_metric`: the nutrient shown on screen. `metrics_available` lists all candidates; `metric_use` toggles which ones are included in batch saves.
+  - `top_k`, `order_desc`: how many rows to show/save and sort direction.
+  - `save_outputs`, `show_chart`: write CSV/Parquet and render the chart.
+  - `category_filter`, `exclude_allergens`, `dislikes`: equality filter on category and substring exclusion in a text column.
+  - `strict_schema` + `schema_columns`: exact mappings for this dataset.
+
+- Columns and strict schema
+  - Base: ID → `fdc_id`; Name → `food_description`; Category → `food_type`; Energy → `energy`.
+  - Nutrients mapped (when present):
+    - Macros: `protein`, `carbs`, `total_fat`, `fiber`, `sugars`.
+    - Lipids detail: `saturated_fat`, `monounsaturated_fat`, `polyunsaturated_fat`, `trans_fat`.
+    - Sugars detail: `glucose`, `fructose`, `sucrose`, `lactose`.
+    - Other: `cholesterol`, `water`, `ash`, `alcohol`, `caffeine`.
+    - Minerals: `calcium`, `iron`, `magnesium`, `phosphorus`, `potassium`, `zinc`, `copper`, `manganese`, `selenium`.
+    - Vitamins: `vitamin_a`, `vitamin_c`, `vitamin_d`, `vitamin_e`, `vitamin_k`, `thiamin_b1`, `riboflavin_b2`, `niacin_b3`, `vitamin_b6`, `folate`, `vitamin_b12`, `choline`.
+    - Pigments: `beta_carotene`, `lycopene`, `lutein_zeaxanthin`.
+  - Text column for filters: prefer `ingredients`/`ingredients_text`, otherwise fall back to `food_description`.
+  - Detection does schema‑exact match first, then a small synonym fallback if missing.
+
+- Densities and formulas
+  - Filter out rows with `energy > 0`.
+  - Per‑kcal for any nutrient `x`: `x_per_kcal = x / energy` (units follow `x`, e.g., mg/kcal for sodium).
+  - Per‑100kcal for readability: `x_per_100kcal = x_per_kcal * 100`.
+  - These columns are built for all available metrics so switching metrics/units is instant.
+
+- Ranking, display, and UX
+  - Choose the nutrient and unit via small UI widgets (dropdown + toggle) or by setting variables in the config cell.
+  - Apply optional filters: `category_filter` equality, and substring exclusion via `exclude_allergens`/`dislikes` against the text column.
+  - Sort by the chosen metric column and take `top_k`.
+  - Display a styled Pandas table (index hidden) and a horizontal Top‑10 bar chart with wrapped labels and value annotations.
+
+- Saving outputs
+  - Path: [output/NutrientDensityExplorer](output/NutrientDensityExplorer)/`<metric>`/`<unit>_{csv|parquet}` where `<unit>` is `per_kcal` or `per_100kcal`.
+  - Batch save uses the same unit and includes the metrics enabled in `metric_use`.
+
+- Notes
+  - Per‑100g rankings are intentionally not displayed/exported to avoid unit inconsistencies in branded entries. Use kcal‑based units for consistent comparisons.
+  - If a nutrient column is truly missing, that metric is skipped (not added to `metrics_available`).
+
+- Example formulas
+  - `protein_per_kcal = protein / energy`
+  - `protein_per_100kcal = protein_per_kcal * 100`
+  - For sodium in mg: `sodium_per_kcal = sodium / energy` and `sodium_per_100kcal = sodium_per_kcal * 100`
+
+## Weekly Meal Plan (7 days, 3 meals/day) — [generate_meal_plan.ipynb](generate_meal_plan.ipynb)
+
+- What it does: builds a balanced 7‑day plan (3 meals/day) from your profile (gender, age, weight, height), activity, goal (loss/maintenance/gain), allergens/preferences, and pantry availability. Also produces a weekly Shopping List with items missing from your pantry.
+- Steps (in order):
+  - Read Parquet; detect columns for ID, Name, `kcal`, `protein_g`, `carb_g`, `fat_g`, and a text column (ingredients/description).
+  - Filtering & flags: exclude allergens and dislikes; set `has_like` and `has_pantry` flags via case‑insensitive keyword detection against `likes` and `pantry_items`.
+  - Targets & formulas (local to this notebook):
+    - BMR (Mifflin–St Jeor): `BMR = 10*w + 6.25*h - 5*a + s`, with `s=5` (male) or `s=-161` (female).
+    - TDEE: `TDEE = BMR * m`, with `m ∈ {1.2, 1.375, 1.55, 1.725}` (sedentary/light/moderate/heavy).
+    - Daily kcal by goal: `daily_kcal = TDEE * α`, with `α = 0.85` (loss), `1.0` (maintenance), `1.10` (gain).
+    - Macro grams: `protein_g = (daily_kcal * p_pct) / 4`, `carb_g = (daily_kcal * c_pct) / 4`, `fat_g = (daily_kcal * f_pct) / 9`.
+    - Meal kcal targets: `meal_kcal[m] = daily_kcal * meal_splits[m]` (splits must sum to `1.0`).
+    - Per‑kcal macro densities used for matching: `protein_per_kcal = protein_g / kcal`, `carb_per_kcal = carb_g / kcal`, `fat_per_kcal = fat_g / kcal`.
+  - Scoring (per meal):
+    - Macro proportion fit: normalize `(p, c, f)` per kcal to `(pp, cp, fp)` and compute `macro_fit = 1 - (|pp - tp| + |cp - tc| + |fp - tf|)`.
+    - Calorie fit: `calorie_fit = max(0, 1 - |kcal - meal_kcal_target| / meal_kcal_target)`.
+    - Total: `Score = w_m*macro_fit + w_c*calorie_fit + like_bonus + pantry_bonus - repeat_penalty` (small penalty if the same food was already used that week).
+  - Plan assembly: convert candidates to Pandas, score against the current meal target, and pick the top‑scoring item for each meal on each day (7×3). Variety is encouraged via the repeat penalty.
+  - Display & results: styled weekly table (Day, Meal, Food, `Calories (kcal)`, macro densities, flags, score) and a stacked macro chart by day. When `write_outputs=True`, saves CSV and JSON to [output/MealPlan](output/MealPlan).
+
+- New: Weekly Shopping List
+  - Ingredients column: the notebook keeps both `Food` and `Ingredients` (if a dedicated ingredients text exists; otherwise falls back to description) to build the list.
+  - Extraction: parses the `Ingredients` text into items (comma‑separated, with simple cleanup), then removes any item that matches `pantry_items` (substring, case‑insensitive).
+  - Aggregation: counts remaining items across all selected meals for the week and shows a table `Ingredient, Count`.
+  - Saving: writes the table to [output/MealPlan/shopping_list.csv](output/MealPlan/shopping_list.csv) alongside the plan exports.
+  - Fallback: if no ingredients are available, the list contains unique foods from the plan that don’t match your pantry keywords.
+
+- Numerical example (illustrative): male, 80 kg, 180 cm, 30 y/o, moderate activity ($m=1.55$), maintenance ($\alpha=1.0$).
+  - `BMR = 10*80 + 6.25*180 - 5*30 + 5 = 1780`.
+  - `TDEE = 1780 * 1.55 ≈ 2759 kcal/day`.
+  - If macro targets are `30% protein`, `40% carbs`, `30% fat`:
+    `protein_g = (2759*0.30)/4 ≈ 207 g`; `carb_g = (2759*0.40)/4 ≈ 276 g`; `fat_g = (2759*0.30)/9 ≈ 92 g`.
+
+- Example output (table) — first 3 meals of Day 1:
+
+| Day   | Meal      | Food                          | Calories (kcal) | Protein/kcal | Carb/kcal | Fat/kcal | Score |
+|-------|-----------|-------------------------------|-----------------|--------------|-----------|----------|-------|
+| Day 1 | Breakfast | Greek yogurt + berries        | 450             | 0.062        | 0.122     | 0.027    | 0.81  |
+| Day 1 | Lunch     | Grilled chicken salad         | 700             | 0.060        | 0.086     | 0.034    | 0.88  |
+| Day 1 | Dinner    | Salmon + quinoa + veggies     | 610             | 0.062        | 0.079     | 0.036    | 0.85  |
+Values are illustrative; scores depend on your settings (macro targets, `meal_splits`, bonuses).
+
+### Why the plan stays balanced
+
+- It simultaneously optimizes the macro mix and per‑meal calories. Very low‑calorie but unbalanced items (e.g., just an apple) score poorly on macro proportions and often on calorie fit—so they aren’t favored.
+- Like/pantry bonuses personalize choices, and a repeat penalty pushes diversity across the week.
+
+
+
+## Nutrient Similarity Search — [nutrient_similarity_search.ipynb](nutrient_similarity_search.ipynb)
+
+What it does: finds foods similar to a chosen reference item using a nutrient vector (macros + optional micronutrients), with configurable feature toggles, weights, and constraints (e.g., “less sodium”, “more protein”). It renders a styled table and a Top‑N chart, then saves results (CSV/JSON) plus a `meta.json` containing the active configuration.
+
+### Configuration (key variables)
+- `input_path`, `fallback_file`, `output_dir`: I/O paths.
+- `query_by_name` or `query_by_id`: how the reference item is selected (name substring, or exact ID).
+- `top_k`: number of candidates to keep after sorting.
+- `same_category_only`: restrict results to the reference item’s category (when present).
+- `use_per_kcal`: normalize features per kcal; otherwise use raw values (effectively per 100g as provided).
+- `scaling`: `zscore` or `none` (see scaling formula below).
+- `exclude_allergens`, `dislikes`: keyword lists used for negative text filtering (ingredients/description).
+- `feature_config`: per‑nutrient dictionary with `use` (include in vector), `weight` (feature weight), and `constraint` (`None` | `less` | `more`). The detected column is attached at runtime as `column`.
+
+### Dataset‑Specific Schema (this repository)
+- `strict_schema`: defaults to `True`. When enabled, the notebook uses exact column names from this dataset via `schema_columns` and only falls back to fuzzy detection if a column is missing.
+- Core mappings used:
+  - ID → `fdc_id`; Name → `food_description`; Category → `food_type`.
+  - Energy → `energy`; Macros → `protein`, `carbs`, `total_fat`; Carbs detail → `sugars` (plus optional `glucose`, `fructose`, `sucrose`, `lactose`).
+  - Lipids detail → `saturated_fat`, `trans_fat`, `monounsaturated_fat`, `polyunsaturated_fat`; Cholesterol → `cholesterol`.
+  - Sodium → `sodium`; Selected minerals/vitamins (if present) → `potassium`, `calcium`, `iron`, `magnesium`, `phosphorus`, `zinc`, `copper`, `manganese`, `selenium`, and common vitamins (`vitamin_a`, `vitamin_c`, `vitamin_d`, `vitamin_e`, `vitamin_k`, `thiamin_b1`, `riboflavin_b2`, `niacin_b3`, `vitamin_b6`, `folate`, `vitamin_b12`).
+- Auto‑detect of extra nutrients: disabled when `strict_schema=True` to keep behavior deterministic. Set `strict_schema=False` to re‑enable scanning for additional vitamin/mineral columns.
+- Energy as a feature: usually keep disabled when `use_per_kcal=True` because energy/kcal equals 1 by construction.
+
+### Column detection
+Algorithm: first exact (lowercased) match, then “contains” (lowercased) against common synonyms/codes:
+- ID: `fdc_id`, `id`
+- Name: `description`, `food_name`, `name`, `brand_name`
+- Energy (kcal): `energy_kcal`, `energy`, `kcal`, `calories`, or nutrient code `1008`
+- Macros: `protein_g`/`1003`, `carbohydrate_g`/`1005`, `fat_g`/`1004`
+- Carb details: `fiber_g`/`dietary_fiber`/`1079`, `sugar_g`/`2000`
+- Sodium: `sodium_mg`/`1093`
+- Category (optional): `food_category`, `wweia_food_category`, `category`
+- Free‑text (ingredients/description): `ingredients`, `ingredients_text`, `description`, `food_name`, `name`, `brand_name`
+- Micronutrients (if present): `calcium_mg`, `iron_mg`, `potassium_mg`, `magnesium_mg`, `zinc_mg`
+
+Auto‑detect: when `auto_detect_extra_nutrients=True`, scan all columns for nutrient‑like keywords (`vitamin`, `vit_`, `phosphorus`, `cholesterol`, etc.) and add new entries in `feature_config` with `use=False` and `weight=0.3`.
+
+### Densities (per kcal / per 100g)
+- Filter rows with `kcal > 0`.
+- Per‑kcal density for nutrient `x` (g or mg): `x_per_kcal = x / kcal`.
+- Per 100g mode: if `use_per_kcal=False`, keep the dataset’s raw values (typically per 100g) without dividing by kcal.
+- Missing nutrient columns (`use=True` but column absent): insert a literal `0.0` to keep the feature vector shape consistent.
+
+### Feature matrix, scaling, and weighting
+- Collect the selected feature columns (those with `use=True`) into matrix `X` (N×D).
+- Scaling `zscore` (per column): `z = (x - mean) / std`. When `std <= 1e-12`, set `std = 1.0` for stability. If `scaling="none"`, then `mean=0` and `std=1` (no change).
+- Weighting: multiply each column by its `weight` from `feature_config`.
+- Row norms: `row_norm = ||X_i|| = sqrt(sum_j X_ij^2) + 1e-12` (the small term avoids division by zero).
+
+### Selecting the reference item
+- By ID: compare `ID` (as string) against `query_by_id` (exact equality).
+- By name: look for `query_by_name` as a substring in the `Food` column (lowercased `contains`); take the first match. If `Food` is duplicated (from renaming), use the first sub‑column.
+- Save `q_idx` (row index in `pdf`), `q_vec` (1×D vector), `q_norm` (its norm), `q_name`, and `q_cat`.
+
+### Similarity (cosine)
+- Formula: `sim(i) = (X_i · X_q) / (||X_i|| * ||X_q||)`.
+- Set `sim(q_idx) = -1.0` to exclude the reference item from results.
+- Sort descending and take `top_k` candidates.
+
+### Constraints and filters
+- Per‑nutrient constraints: for each used nutrient `k`, if `constraint='less'`, require `cand[k] <= q[k]`; if `constraint='more'`, require `cand[k] >= q[k]`. The reference value `q[k]` comes from the selected density column (per kcal or per 100g).
+- Same category only: if `same_category_only=True` and `Category` exists, keep only `Category == q_cat`.
+- Text filters: in `Text` (ingredients/description), drop any row containing any term from `exclude_allergens` or `dislikes` (lowercased `contains`).
+- Percent deltas (transparency): for each used nutrient `k`, `Delta k (%) = ((cand[k] - q[k]) / (q[k] + 1e-12)) * 100`.
+
+### Result columns
+- `ID`, `Food`, optional `Category`.
+- `Similarity` (cosine).
+- Actual nutrient values used (e.g., `protein_per_kcal`, `sodium_mg_per_kcal`, etc.).
+- `Delta k (%)` for each active nutrient.
+
+### Visualization and saving
+- Pandas `Styler` table: hidden index, formatting for `Similarity` and selected `Delta` columns (e.g., Protein, Sodium), and a green gradient over `Similarity`.
+- “Top‑N Similarity” chart: horizontal bar chart for the first `top_n_chart` items with title “Top similar (to <q_name>)”.
+- Saving: under [output/SimilaritySearch/<slug>](output/SimilaritySearch) write `similar_results.csv`, `similar_results.json`, and `meta.json` (containing `query`, `config`, `features_used`, and the `feature_config` with attached detected columns).
+
+### Practical notes
+- If many rows have near‑identical values (after `zscore` and weighting), cosine scores can approach 1. Adjust `feature_config` (select relevant nutrients, tune `weight`) and/or enable `same_category_only` and text filters to narrow the search.
+- Ensure the reference item is excluded (explicitly set with `sims[q_idx] = -1`).
+- When a nutrient is missing, it enters the vector as zero—shape stays consistent, but that nutrient won’t influence similarity unless given a non‑zero weight (in which case zero can lower similarity versus rows with high values for that nutrient).
 
 
-## scripts/nutritional_correlation_analysis.ipynb
-
-This notebook analyzes correlations between nutrients using PySpark and pandas, with a strict column mapping. Each cell has the following role:
-
-### Cell 1: Introduction
-- Explains the notebook's purpose: to compute and visualize correlations between nutrients using PySpark, with a strict schema.
-
-### Cell 2: Imports and Spark Initialization
-- Imports required libraries: PySpark, pandas, seaborn, matplotlib.
-- Creates the Spark session and prints the Spark version.
-
-### Cell 3: Configuration and Schema Mapping
-- Defines the input and fallback data paths.
-- Sets up a strict mapping from source columns to standardized names (e.g., 'protein' <- 'protein').
-- Lists the nutrient columns to be analyzed.
-
-### Cell 4: Data Loading and Schema Application
-- The `read_profiles` function loads data from the Parquet folder or fallback file.
-- The `apply_strict_schema` function selects and renames columns according to the mapping.
-- Data is loaded, mapped, and the first 5 rows are displayed. The total row count is printed.
-
-### Cell 5: Optional Filtering
-- Allows filtering by food category or text (commented out, example: only 'branded_food').
-
-### Cell 6: Preparation for Correlation
-- Selects only the nutrient columns.
-- Drops rows with too many missing values (requires at least 3 valid nutrients).
-- Converts the result to a pandas DataFrame for Pearson correlation matrix calculation.
-- Computes and displays the correlation matrix between nutrients.
-
-### Cell 7: Heatmap Visualization
-- Uses seaborn to visualize the correlation matrix as a colored heatmap.
-- Allows quick identification of strong relationships between nutrients.
-
-### Cell 8: Extract Strong Correlations
-- Iterates through the matrix and extracts nutrient pairs with absolute correlation > 0.5 (positive or negative).
-- Sorts and displays these pairs with their correlation coefficient values.
-
-### Cell 9: Interpretation
-- Explains how to interpret strong correlations: nutrients that appear together, inverse effects, usefulness for research or product development.
-
-**Notes:**
-- The "score" here is the Pearson correlation coefficient between each pair of nutrients, not a health or preference score.
-- The Pearson correlation coefficient (r) measures the linear relationship between two variables, ranging from -1 (perfect negative correlation) to +1 (perfect positive correlation). A value close to 0 means no linear correlation. In this context, it shows how strongly two nutrients tend to increase or decrease together across foods.
-- The notebook can be extended with additional filters or other correlation/statistical methods.
-
-## scripts/nutritional_outlier_analysis.ipynb
-
-This notebook detects foods with extreme (outlier) values for key nutrients using PySpark, and provides recommendations for special dietary needs. Each cell has the following role:
-
-### Cell 1: Introduction
-- Describes the notebook's purpose: to detect foods with extreme nutrient values and generate dietary recommendations.
-
-### Cell 2: Imports and Spark Initialization
-- Imports required libraries: PySpark, pandas, seaborn, matplotlib, os.
-- Creates the Spark session and prints the Spark version.
-
-### Cell 3: Configuration and Schema Mapping
-- Sets up input/output paths and output directory.
-- Defines a strict mapping from source columns to standardized names (e.g., 'protein' <- 'protein').
-- Lists the nutrient columns to be analyzed.
-
-### Cell 4: Data Loading and Schema Application
-- Loads the data from Parquet, applies the strict schema, selects relevant columns, and ensures all nutrients are cast to numeric type.
-- Displays the first 5 rows of the processed data.
-
-### Cell 5: Outlier Detection (IQR Method)
-- For each nutrient, calculates the first (Q1) and third (Q3) quartiles using approxQuantile.
-- Computes the interquartile range (IQR = Q3 - Q1).
-- Defines outlier thresholds:
-    - Lower bound: Q1 - 1.5 × IQR (values below are considered 'low' outliers)
-    - Upper bound: Q3 + 1.5 × IQR (values above are considered 'high' outliers)
-- Identifies and stores foods that are high or low outliers for each nutrient.
-- Prints the bounds and the number of high/low outliers for each nutrient.
-
-### Cell 6: Outlier Visualization
-- Defines a function to plot bar charts for the top high or low outliers for a selected nutrient.
-- Example plots are generated for several nutrients.
-
-### Cell 7: Dietary Recommendations
-- Defines functions to recommend foods for nutrient deficiency (using high outliers) or for restriction (using low outliers).
-- Displays the top foods for each case.
-
-### Cell 8: Save Outlier and Recommendation Results
-- Saves all detected high and low outliers for each nutrient as CSV files in the output directory.
-- Also saves specific recommendations for iron deficiency and sodium restriction as CSV files.
-- Prints confirmation for each file saved.
-
-**Formulas and Methods Used:**
-- **Quartiles (Q1, Q3):** Computed using Spark's approxQuantile function for each nutrient column.
-- **Interquartile Range (IQR):**
-  $$ IQR = Q3 - Q1 $$
-- **Outlier Thresholds:**
-  - Lower bound: $$ Q1 - 1.5 \times IQR $$
-  - Upper bound: $$ Q3 + 1.5 \times IQR $$
-- **Outlier Detection:**
-  - Foods with values below the lower bound are 'low' outliers.
-  - Foods with values above the upper bound are 'high' outliers.
-- **Visualization:**
-  - Bar charts for top high/low outliers using matplotlib.
-- **Recommendation Logic:**
-  - For deficiency: recommend foods from high outliers.
-  - For restriction: recommend foods from low outliers.
-
-This approach allows for robust detection of foods with extreme nutrient values and supports targeted dietary recommendations.
-
-## scripts/nutrient_similarity_search.ipynb
-
-This notebook finds foods with similar nutritional profiles using PySpark and pandas. Each cell has the following role:
-
-### Cell 1: Imports and Spark Session
-- Imports required libraries: PySpark, pandas, numpy, etc.
-- Creates the Spark session and prints the Spark version.
-
-### Cell 2: Configuration
-- Sets input/output paths and fallback file.
-- Allows you to select the reference product by name or ID.
-- Configures the number of results (top_k), category restriction, normalization (per kcal), scaling (zscore), and chart display.
-- Allows text-based filters (exclude allergens, dislikes).
-- Defines a strict schema for column mapping.
-- **feature_config**: lets you choose which nutrients to use, their weights, and constraints (see below for details).
-
-### Cell 3: Data Loading
-- Loads the dataset from Parquet and prints the schema.
-
-### Cell 4: Column Detection
-- Detects and maps the relevant columns for each nutrient and metadata (id, name, category, etc.), using the strict schema or auto-detection.
-- Updates feature_config with the actual column names found in the dataset.
-
-### Cell 5: Feature Engineering
-- Computes per-kcal (or per-100g) values for all selected nutrients.
-- Builds a feature matrix (numpy array) for all foods, with missing values filled as 0.
-- Applies z-score scaling if selected.
-- Applies the weights from feature_config to each nutrient.
-
-### Cell 6: Reference Item Selection
-- Selects the reference product (by name substring or ID) and extracts its feature vector.
-
-
-### Cell 7: Similarity Calculation
-- Calculates cosine similarity between the nutrient vector of the reference product and all other products:
-  $$ similarity(A, B) = \frac{A \cdot B}{\|A\| \cdot \|B\|} $$
-- Excludes the reference product from the results.
-
-### Cell 8: Filtering and Constraints
-- Applies additional filters:
-  - **same_category_only**: keeps only products in the same category as the reference.
-  - **exclude_allergens/dislikes**: removes products containing certain allergens or unwanted ingredients.
-  - **feature_config constraints**: for each nutrient you can set:
-    - **'none'**: no restriction.
-    - **'less'**: keeps only products with value less than or equal to the reference.
-    - **'more'**: keeps only products with value greater than or equal to the reference.
-
-### Cell 9: Result Formatting
-- Sorts results by similarity and keeps the top_k most similar products.
-- Calculates and displays percent differences from the reference for each nutrient used.
-
-### Cell 10: Visualization
-- Displays results in a styled table and, optionally, as a chart.
-
-**How Similarity is Calculated:**
-- Each food is represented as a vector of nutrients (with weights and optional z-score normalization).
-- Similarity is the cosine of the angle between the reference vector and the others.
-- The weights in feature_config control how much each nutrient influences the similarity (higher weight = more influence).
-
-**Constraints in feature_config:**
-- **'none'**: no restriction for that nutrient.
-- **'less'**: keeps only products with value <= reference (e.g., less sodium).
-- **'more'**: keeps only products with value >= reference (e.g., more protein).
-
-**Summary:**
-- The script allows advanced configuration of nutritional similarity criteria, weights, restrictions, and filters, so you can quickly find products with a nutritional profile close to any reference food, according to your rules.
-
-## scripts/nutrient_density_explorer.ipynb
-
-This notebook ranks foods by nutrient density (e.g., protein, fiber, vitamins per kcal or per 100 kcal) using PySpark and pandas, with flexible configuration and strict schema mapping. It supports advanced metric selection and outputs top foods for any nutrient, with optional charting and batch export.
-
-### Cell 1: Imports and Spark Initialization
-- Imports required libraries: PySpark, pandas, matplotlib.
-- Creates the Spark session and prints the Spark version.
-
-### Cell 2: Configuration and Schema Mapping
-- Sets input/output paths and fallback file (for legacy compatibility).
-- Configures output directory, top_k, sorting order, unit (per_kcal or per_100kcal), and output/chart options.
-- Defines a strict mapping from source columns to standardized names (e.g., 'protein' <- 'protein').
-- Lists all available metrics (nutrients) and sets which are enabled by default.
-
-### Cell 3: Column Detection and Data Loading
-- Defines helper functions to detect and map columns from the dataset, using strict schema or fuzzy matching.
-- Loads the dataset from Parquet (using input_path or fallback_file).
-- Identifies all relevant columns for id, name, category, kcal, and each nutrient.
-- Builds a dictionary mapping each metric to its column name.
-- Filters metrics to only those present in the data.
-- Selects the default metric for display.
-
-### Cell 4: Density Calculation
-- Filters out foods with kcal <= 0.
-- For each metric, computes three columns:
-    - Per kcal (e.g., protein_per_kcal = protein / kcal)
-    - Per 100 kcal (for readability)
-    - Per 100g/raw (original value)
-- Appends all computed density columns to the DataFrame.
-
-### Cell 5: Filtering (No Filters Applied)
-- No category, allergen, or dislike filters are applied (all foods are included).
-- The DataFrame is ready for ranking.
-
-### Cell 6: Helpers for Top-K and Display
-- Defines helper functions to select columns, compute top-K foods for a metric, and display results as styled tables and bar charts.
-- Uses pandas for table formatting and matplotlib for visualization.
-
-### Cell 7: Compute and Display for Selected Metric
-- For the selected metric and unit (per_kcal or per_100kcal), computes the top-K foods.
-- Displays results as a table and bar chart.
-- Optionally saves outputs as CSV/Parquet if enabled.
-
-### Cell 8: Batch Save for All Enabled Metrics
-- If batch export is enabled, computes and saves top-K tables for all enabled metrics in the output directory.
-
-**How It Works:**
-- The notebook loads a precomputed nutritional profile dataset (Parquet format).
-- It maps all relevant columns using a strict schema, with fallback to fuzzy matching if needed.
-- For each nutrient, it computes density per kcal and per 100 kcal, enabling fair comparison across foods.
-- You can select any metric (nutrient) to rank foods by, and see the top-K results, with optional visualization.
-- No foods are excluded by category, allergen, or dislike (all are included in the analysis).
-- Batch export allows saving results for all metrics at once.
-
-**Formulas Used:**
-- Per-kcal density:  
-  $\text{density}_{\text{per kcal}} = \frac{\text{nutrient}}{\text{kcal}}$
-- Per-100kcal:  
-  $\text{density}_{\text{per 100 kcal}} = \text{density}_{\text{per kcal}} \times 100$
-
-**Summary:**
-- This script provides a flexible, schema-driven way to rank foods by any nutrient density, with full control over metrics, units, and outputs. It is suitable for nutritional research, product development, or dietary planning.
-
-## scripts/ingredient_frequency_analysis.ipynb
-
-This notebook analyzes the frequency of ingredients across all foods in the dataset using PySpark and pandas, with strict schema enforcement and advanced normalization.
-
-**Main features:**
-- Loads data with a strict schema (fdc_id, description, all_ingredients).
-- Normalizes ingredient names: lowercase, removes spaces, special characters, and '&'.
-- Counts each ingredient only once per food (no duplicates).
-- Calculates the frequency of each ingredient and collects example foods where it appears.
-- Visualizes the top 10 most common and top 10 rarest ingredients, with examples.
-- Saves the complete ingredient frequency list to `output/ingredient_frequency/ingredient_frequency.csv`.
-
-**How to use:**
-1. Run the notebook to generate statistics and visualizations.
-2. Check the tables in the notebook for top ingredients and examples.
-3. Find the CSV file with all ingredients and their frequency in the output folder for further analysis.
-
-**Summary:**
-This script provides a robust method for analyzing ingredient frequency, identifying the most and least common ingredients, and exporting results for research or reporting.
-
-## Healthiness Scoring Script
-
-The healthiness scoring script calculates a score for each food item by combining ingredient and nutrient information to assess how healthy a product is.
-
-### How the Score is Calculated
-- **Initial Filtering:** Only foods with non-null and non-zero values for the main nutrients (energy, protein, fiber, sugars, fat) are kept.
-- **Ingredient Score:** Each ingredient receives +1 if considered healthy (e.g., vegetables, nuts, whole grains) and -1 if considered unhealthy (e.g., sugar, hydrogenated oils, artificial additives).
-- **Nutrient Score:** Points are awarded for beneficial nutrients (protein, fiber, vitamins, minerals) and penalties are applied for less healthy nutrients (sugars, saturated fat, sodium, cholesterol).
-- **Nutri-Score Integration:** An external Nutri-Score is included, which considers both positive and negative nutrients according to European standards.
-- **Final Score:** The total score is the sum of the ingredient score, nutrient score, and the Nutri-Score adjustment.
-
-### Score Interpretation
-- A high score indicates a healthy food, rich in beneficial nutrients and natural ingredients.
-- A negative score indicates an unhealthy food, high in sugar, unhealthy fats, or artificial additives.
-
-### Export and Visualization
-- The script exports scores to a CSV file in the `output/HealthinessScores` folder.
-- It displays the top 10 healthiest and least healthy foods, with details about their score and composition.
-
-### Customization
-- Weights and ingredient lists can be adjusted in the script to reflect your preferences or desired standards.
-- Graphical visualizations of score distributions can be added for deeper analysis.
-
-For more details, see the notebook `scripts/healthiness_scoring.ipynb`.
-
-## Recipe Ideas Script
-
-This script suggests recipe ideas based on the ingredients you have, your dislikes, calorie preferences, and nutrition profile. It is robust, flexible, and uses both ingredient and nutrient data for ranking.
-
-### How it works
-- Loads food and ingredient data, normalizes ingredient names, and builds a set for each food.
-- You provide:
-  - `ingredients`: List of ingredients you have at home.
-  - `dislikes`: List of ingredients to exclude.
-  - `kcal_min`/`kcal_max`: Minimum/maximum allowed calories per food.
-  - `profile`: Nutrition profile to use for scoring. Only one can be active at a time: 'none', 'healthy', 'high_protein', 'high_fiber'.
-- The script filters foods to only those that use at least 3 of your ingredients (or all, if you provide fewer than 3).
-- Foods containing any disliked ingredient are excluded.
-- Foods are further filtered by calorie range if specified.
-
-### Scoring and Profiles
-- Each food is scored based on:
-  - Number of matching ingredients (higher is better)
-  - Nutrient values, weighted according to the selected profile:
-    - **none**: No nutrient weights, only ingredient match matters.
-    - **healthy**: Favors high fiber/protein, penalizes sugars, fat, and calories.
-    - **high_protein**: Strongly favors protein content.
-    - **high_fiber**: Strongly favors fiber content.
-- Only one profile can be active at a time. The weights for each profile are defined in the script and can be customized.
-
-### Output
-- The script displays the top N recipe ideas (foods) that best match your configuration, showing their ingredients, energy, fiber, protein, sugars, fat, and score.
-
-### Customization
-- You can adjust the ingredient list, dislikes, calorie limits, and profile at the top of the notebook.
-- You can also modify the scoring weights in the `PROFILE_WEIGHTS` dictionary to better fit your needs.
-
-For more details, see the notebook `scripts/recipe_ideas.ipynb`.
-
-# Model-based Scripts
-
-This section contains scripts that use machine learning or NLP models for advanced recommendations or similarity search.
-
-## scripts/semantic_similarity_nlp.ipynb
-
-This notebook recommends foods/products that are semantically similar to a given query (e.g., a product name and its ingredients), using a modern NLP model.
-
-**Model Used:**
-- [Sentence Transformers](https://www.sbert.net/) – specifically, the `all-MiniLM-L6-v2` model, a fast and efficient transformer-based model for generating dense semantic embeddings of text.
-
-**How the Model Works:**
-- The model converts each product's name and ingredient list into a single text string (e.g., "Product Name. Ingredients: ...").
-- It generates a vector embedding for each product using the transformer model.
-- For a user query (e.g., a product description and ingredients), the model generates an embedding and computes cosine similarity with all product embeddings.
-- The top-N most similar products are recommended, based on semantic meaning, not just keyword overlap.
-
-**Cell-by-cell breakdown:**
-
-1. **Imports**
-  - Loads pandas, numpy, and Sentence Transformers libraries.
-
-2. **Load Data**
-  - Loads the ingredients dataset (Parquet format) using pandas.
-  - Keeps only the product ID, description, and ingredient list.
-
-3. **Create Text for Embedding**
-  - Defines a function to join the ingredient list into a string.
-  - Creates a new column combining the product description and ingredients into a single text string for each product.
-
-4. **Load Embedding Model**
-  - Loads the `all-MiniLM-L6-v2` Sentence Transformer model.
-
-5. **Compute Embeddings**
-  - Computes the embedding vector for each product's combined text.
-
-6. **Recommendation Function**
-  - Defines a function that takes a query (product description + ingredients), encodes it, computes cosine similarity to all products, and returns the top-N most similar products.
-
-7. **Usage Example**
-  - Shows how to use the function to recommend products similar to a given query.
-  - Displays the results with similarity scores.
-
-**Summary:**
-- This script enables semantic product recommendations using state-of-the-art NLP embeddings, making it possible to find similar foods even if they don't share exact keywords or ingredient names.
-
-## scripts/ingredient_clustering_embeddings.ipynb
-
-This notebook clusters ingredients using Sentence Transformers embeddings and KMeans, visualizes the clusters, and saves grouped ingredient lists and example foods to CSV files. PySpark is used for data loading and ingredient-food mapping.
-
-**Model Used:**
-- [Sentence Transformers](https://www.sbert.net/) – `all-MiniLM-L6-v2` for embedding ingredient names into dense vectors.
-- [KMeans Clustering](https://scikit-learn.org/stable/modules/generated/sklearn.cluster.KMeans.html) – for grouping similar ingredients based on their embeddings.
-
-**How the Model Works:**
-- Each unique ingredient name is embedded into a high-dimensional vector using the transformer model, capturing semantic similarity.
-- KMeans clusters these vectors into groups of similar ingredients (e.g., spices, grains, sweeteners).
-- Each cluster can be interpreted as a category of semantically similar ingredients.
-
-**Cell-by-cell breakdown:**
-
-1. **Imports**
-  - Loads pandas, numpy, PySpark, Sentence Transformers, KMeans, matplotlib, seaborn, and os.
-
-2. **PySpark Session and Data Loading**
-  - Initializes Spark session.
-  - Loads the ingredients dataset (Parquet format) with schema enforcement.
-
-3. **Explode Ingredients and Build Ingredient-Food Mapping**
-  - Uses PySpark to explode the ingredient lists and map each ingredient to the foods it appears in.
-  - Aggregates foods per ingredient and converts to pandas DataFrame.
-
-4. **Clean and Deduplicate Ingredient Names**
-  - Normalizes ingredient names (lowercase, strip) and removes duplicates.
-
-5. **Embed Ingredient Names**
-  - Uses Sentence Transformers to embed each unique ingredient name into a vector.
-
-6. **Cluster Ingredients**
-  - Applies KMeans to the ingredient embeddings to assign each ingredient to a cluster/category.
-
-7. **Visualize Clusters**
-  - Reduces embeddings to 2D with PCA and visualizes clusters using seaborn scatterplot.
-
-8. **Show Example Ingredients and Foods per Cluster**
-  - For each cluster, prints sample ingredient names and example foods.
-
-9. **Save Clustered Ingredients and Foods to CSVs**
-  - For each cluster, saves a CSV file with the ingredient names and example foods in `output/ingredient_categories/`.
-
-**Summary:**
-- This script enables unsupervised grouping of ingredients into semantic categories, provides visualizations, and exports the results for further analysis or use in downstream applications.
